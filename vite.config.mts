@@ -113,5 +113,9 @@ export default defineConfig(({ command }) => ({
     // ⚠ root 是 src/，所以这里的路径相对于 src；只收 src 下的单测
     // （e2e/ 在 root 之外，由 Playwright 跑，混进来会因缺少 test 运行时直接失败）
     include: ['**/*.{test,spec}.ts'],
+    coverage: {
+      // 相对 repo 根目录，和 vitest.config 里 btools 的写法一致
+      reportsDirectory: r('.coverage'),
+    },
   },
 }))

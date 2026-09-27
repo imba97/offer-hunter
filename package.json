@@ -1,18 +1,18 @@
 {
   "name": "offer-hunter",
   "displayName": "Offer Hunter",
-  "version": "0.1.0",
+  "version": "1.0.1",
   "private": true,
   "packageManager": "pnpm@9.7.1",
   "description": "在 BOSS 直聘上用 AI 分析简历与 JD 的匹配度，并按你的规则生成定制打招呼语（复制后由你本人发送）。",
   "scripts": {
-    "dev": "npm run clear && cross-env NODE_ENV=development run-p dev:*",
-    "dev-firefox": "npm run clear && cross-env NODE_ENV=development EXTENSION=firefox run-p dev:*",
+    "dev": "pnpm run clear && cross-env NODE_ENV=development run-p dev:*",
+    "dev-firefox": "pnpm run clear && cross-env NODE_ENV=development EXTENSION=firefox run-p dev:*",
     "dev:prepare": "esno scripts/prepare.ts",
-    "dev:background": "npm run build:background -- --mode development",
-    "dev:injected": "npm run build:injected -- --mode development",
+    "dev:background": "pnpm run build:background -- --mode development",
+    "dev:injected": "pnpm run build:injected -- --mode development",
     "dev:web": "vite",
-    "dev:js": "npm run build:js -- --mode development",
+    "dev:js": "pnpm run build:js -- --mode development",
     "build": "cross-env NODE_ENV=production run-s clear build:web build:prepare build:background build:js build:injected",
     "build:prepare": "esno scripts/prepare.ts",
     "build:background": "vite build --config vite.config.background.mts",
@@ -29,9 +29,11 @@
     "clear": "rimraf --glob extension/dist extension/manifest.json extension.*",
     "lint": "eslint --cache .",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
     "postinstall": "simple-git-hooks",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "release": "bumpp"
   },
   "devDependencies": {
     "@antfu/eslint-config": "^2.27.0",
@@ -45,9 +47,11 @@
     "@typescript-eslint/eslint-plugin": "^8.2.0",
     "@unocss/reset": "^0.62.2",
     "@vitejs/plugin-vue": "^5.1.2",
+    "@vitest/coverage-v8": "^2.1.9",
     "@vue/compiler-sfc": "^3.4.38",
     "@vue/test-utils": "^2.4.6",
     "@vueuse/core": "^11.0.1",
+    "bumpp": "^12.0.0",
     "chokidar": "^3.6.0",
     "cross-env": "^7.0.3",
     "crx": "^5.0.1",
@@ -56,8 +60,8 @@
     "fs-extra": "^11.2.0",
     "jsdom": "^24.1.1",
     "kolorist": "^1.8.0",
-    "lint-staged": "^15.2.9",
     "monaco-editor-core": "^0.57.0",
+    "nano-staged": "^1.0.2",
     "npm-run-all": "^4.1.5",
     "rimraf": "^6.0.1",
     "shiki": "^4.4.3",
@@ -68,7 +72,7 @@
     "unplugin-icons": "^0.19.2",
     "unplugin-vue-components": "^0.27.4",
     "vite": "^5.4.2",
-    "vitest": "^2.0.5",
+    "vitest": "^2.1.9",
     "vue": "^3.4.38",
     "vue-demi": "^0.14.10",
     "web-ext": "^8.2.0",
@@ -76,9 +80,9 @@
     "webextension-polyfill": "^0.12.0"
   },
   "simple-git-hooks": {
-    "pre-commit": "pnpm lint-staged"
+    "pre-commit": "pnpm nano-staged"
   },
-  "lint-staged": {
-    "*": "eslint --fix"
+  "nano-staged": {
+    "*.{js,jsx,ts,tsx,mjs,cjs,vue,json,jsonc,json5,md,css,scss,less,html}": "eslint --fix"
   }
 }

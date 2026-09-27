@@ -127,14 +127,48 @@ pnpm pack:firefox   # Firefox：用 Firefox 清单重新构建并打包 extensio
 ### 其他命令
 
 ```bash
-pnpm lint        # ESLint
-pnpm typecheck   # tsc --noEmit
-pnpm test        # 单元测试（Vitest）
-pnpm test:e2e    # 端到端测试（Playwright，首次需 npx playwright install chromium）
+pnpm lint           # ESLint
+pnpm typecheck      # tsc --noEmit
+pnpm test           # 单元测试（Vitest）
+pnpm test:coverage  # 单元测试 + 覆盖率（产物在 .coverage/）
+pnpm test:e2e       # 端到端测试（Playwright，首次需 npx playwright install chromium）
 ```
 
 > e2e 必须用 Playwright 自带的 Chromium：Chrome 137+ 已不再接受 `--load-extension`，
 > 系统的 Chrome 装不上未打包扩展。
+
+### 发布
+
+```bash
+pnpm release   # bumpp：选版本 → 改 package.json → commit → 打 vX.Y.Z tag → push
+```
+
+`pnpm release` 只做「改版本号 + 打 tag + 推 tag」这一件事，剩下的都交给
+`.github/workflows/release.yaml`：
+
+```
+pnpm release
+  └─ push tag vX.Y.Z
+       └─ GitHub Actions: release
+            ├─ pnpm install --frozen-lockfile
+            ├─ pnpm build                （必须先构建，见 workflow 内注释）
+            ├─ pnpm test:coverage
+            ├─ pnpm pack:zip             → extension.zip（Chrome）
+            ├─ pnpm pack:firefox         → extension.xpi（Firefox）
+            ├─ changelogithub            → 生成 changelog 并创建 GitHub Release
+            ├─ gh release upload         → 把 zip / xpi 挂到 Release
+            └─ chrome-webstore-upload    → 上传 + 发布（未配 CHROME_* secrets 时自动跳过）
+```
+
+⚠ 三点注意：
+
+- **commit message 必须是 conventional commits**（`feat:` / `fix:` / `chore:` …），
+  changelogithub 靠它生成 release notes，写别的就分不出条目。
+- **CI 完全不碰 `key.pem`**：上架走的是 zip，扩展 ID 由 Chrome Web Store 生成，
+  发布链路里没有 `key.pem` 的位置。仓库里那个 `key.pem` 只影响本地
+  `pnpm pack:crx` 打出来的 `.crx`（它的 ID 和商店版不是同一个），
+  只有你自己分发 `.crx` 时才需要在乎它。
+- **首次上架必须在 Chrome Web Store 后台手动完成**，API 只接受后续更新。
 
 ## 目录结构
 
