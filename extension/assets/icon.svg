@@ -1,3 +1,22 @@
-<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-<path d="M26.6667 1.66667H24V7H8V9.66667H5.33333V20.3333H8V23H10.6667V28.3333H21.3333V25.6667H26.6667V23H21.3333V20.3333H26.6667V17.6667H21.3333V15H10.6667V20.3333H8V9.66667H24V7H26.6667V1.66667ZM18.6667 25.6667H13.3333V17.6667H18.6667V25.6667Z" fill="#888888"/>
+<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect x="3" y="2" width="122" height="124" rx="28" fill="#FFFFFF"/>
+
+  <!-- JD panel (background) -->
+  <rect x="46" y="14" width="76" height="66" rx="9" fill="#E6F5F4" stroke="#149E9B" stroke-width="6"/>
+  <path d="M52 20h10M68 20h10M84 20h10" stroke="#149E9B" stroke-width="5" stroke-linecap="round"/>
+
+  <!-- resume card (foreground) -->
+  <rect x="6" y="34" width="64" height="82" rx="9" fill="#FFFFFF" stroke="#149E9B" stroke-width="6"/>
+  <circle cx="27" cy="58" r="9" fill="#149E9B"/>
+  <path d="M42 52h18M42 64h18M18 84h44M18 96h30" stroke="#149E9B" stroke-width="5" stroke-linecap="round"/>
+
+  <!-- AI match lens -->
+  <circle cx="74" cy="84" r="25" fill="#FFFFFF" stroke="#149E9B" stroke-width="7"/>
+  <path d="M93 103l17 17" stroke="#149E9B" stroke-width="9" stroke-linecap="round"/>
+  <path d="M64 88l4.6-10.5L73 88l-4.4 2.6L64 88Z" fill="#149E9B"/>
+  <path d="M73 88l4.6-10.5L82 88h-9Z" fill="#149E9B" opacity=".55"/>
+  <path d="M64 94h18" stroke="#149E9B" stroke-width="4" stroke-linecap="round"/>
+
+  <!-- outreach send -->
+  <path d="M112 62l14 11-14 11v-8l-9-3 9-3v-8Z" fill="#149E9B"/>
 </svg>

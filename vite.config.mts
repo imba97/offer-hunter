@@ -103,7 +103,6 @@ export default defineConfig(({ command }) => ({
     rollupOptions: {
       input: {
         options: r('src/options/index.html'),
-        popup: r('src/popup/index.html'),
         sidepanel: r('src/sidepanel/index.html'),
       },
     },
@@ -111,5 +110,8 @@ export default defineConfig(({ command }) => ({
   test: {
     globals: true,
     environment: 'jsdom',
+    // ⚠ root 是 src/，所以这里的路径相对于 src；只收 src 下的单测
+    // （e2e/ 在 root 之外，由 Playwright 跑，混进来会因缺少 test 运行时直接失败）
+    include: ['**/*.{test,spec}.ts'],
   },
 }))

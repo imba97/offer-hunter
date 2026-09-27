@@ -15,3 +15,6 @@ node_modules
 src/auto-imports.d.ts
 src/components.d.ts
 .eslintcache
+# Playwright 产物（e2e 跑完会生成 .last-run.json 之类，不该参与 lint 与提交）
+test-results
+playwright-report

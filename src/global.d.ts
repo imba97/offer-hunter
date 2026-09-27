@@ -6,3 +6,8 @@ declare module '*.vue' {
   const component: any
   export default component
 }
+
+/** Monaco 的全局环境配置，用于声明不需要 web worker */
+interface Window {
+  MonacoEnvironment?: import('monaco-editor-core').Environment
+}
