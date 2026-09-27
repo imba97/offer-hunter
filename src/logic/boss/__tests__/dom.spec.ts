@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { buildDomFallbackJob, readJobOutlineFromDom } from '../dom'
 import { EMPTY_JOB_NAME } from '~/logic/types'
+import { buildDomFallbackJob, readJobOutlineFromDom } from '../dom'
 
 /**
  * DOM 兜底岗位的单测。

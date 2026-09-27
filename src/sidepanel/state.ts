@@ -1,6 +1,6 @@
+import type { DiagnosticResult, JobRecord, JobView } from '~/logic/types'
 import { reactive } from 'vue'
 import { onMessage, sendMessage } from 'webext-bridge/options'
-import type { DiagnosticResult, JobRecord, JobView } from '~/logic/types'
 import { isBossPageUrl } from '~/logic/boss/selectors'
 
 /**

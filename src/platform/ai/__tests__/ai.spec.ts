@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import { parseJsonLoose } from '../structured'
 import {
   fitInputs,
   normalizeGreeting,
@@ -7,6 +6,7 @@ import {
   normalizeScore,
 } from '../matching'
 import { createAiProvider } from '../platforms'
+import { parseJsonLoose } from '../structured'
 
 /**
  * AI 层单测：容错解析 + 模型返回值的归一化 + 输入裁剪。

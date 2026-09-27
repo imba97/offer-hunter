@@ -1,3 +1,5 @@
+import type { JobView } from '~/logic/types'
+import { createEmptyJobView, EMPTY_JOB_NAME } from '~/logic/types'
 import { extractCleanText } from './jd'
 import {
   JOB_COMPANY_SELECTORS,
@@ -5,8 +7,6 @@ import {
   JOB_DETAIL_DESC,
   JOB_TITLE_SELECTORS,
 } from './selectors'
-import type { JobView } from '~/logic/types'
-import { EMPTY_JOB_NAME, createEmptyJobView } from '~/logic/types'
 
 /**
  * BOSS 直聘页面上的 DOM 读取。

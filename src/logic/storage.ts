@@ -1,12 +1,12 @@
-import { getCurrentScope, onScopeDispose, ref, watch } from 'vue'
 import type { Ref } from 'vue'
-import { storage } from 'webextension-polyfill'
 import type {
   AiSettings,
   JobRecord,
   MatchingSettings,
   Resume,
 } from './types'
+import { getCurrentScope, onScopeDispose, ref, watch } from 'vue'
+import { storage } from 'webextension-polyfill'
 import {
   createDefaultAiSettings,
   createDefaultMatchingSettings,
@@ -282,7 +282,7 @@ export function useStoredValue<T extends object>(
       return
     if (timer)
       clearTimeout(timer)
-    timer = setTimeout(() => flush(state.value), WRITE_DEBOUNCE_MS)
+    timer = setTimeout(flush, WRITE_DEBOUNCE_MS, state.value)
   }, { deep: true, flush: 'post' })
 
   // 其他上下文改动时同步过来（例如面板改了阈值，设置页立即反映）

@@ -1,6 +1,10 @@
 <script setup lang="ts">
+import type { JobRecord, JobView, MatchingSettings, MatchResult } from '~/logic/types'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { sendMessage } from 'webext-bridge/options'
+import { JOBS_PAGE_URL } from '~/logic/boss/selectors'
+import { STORAGE_KEYS, useStoredValue } from '~/logic/storage'
+import { createDefaultMatchingSettings } from '~/logic/types'
 import {
   currentJob,
   diagnostic,
@@ -17,10 +21,6 @@ import {
 import Diagnostics from './views/Diagnostics.vue'
 import JobDetailCard from './views/JobDetailCard.vue'
 import QuickSettings from './views/QuickSettings.vue'
-import { createDefaultMatchingSettings } from '~/logic/types'
-import type { JobRecord, JobView, MatchResult, MatchingSettings } from '~/logic/types'
-import { JOBS_PAGE_URL } from '~/logic/boss/selectors'
-import { STORAGE_KEYS, useStoredValue } from '~/logic/storage'
 
 /**
  * 侧边栏主体：当前岗位详情 + 匹配流程 + 诊断 + 快捷设置。

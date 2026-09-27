@@ -1,6 +1,6 @@
 import { defineConfig } from 'vite'
-import { sharedConfig } from './vite.config.mjs'
 import { isDev, r } from './scripts/utils'
+import { sharedConfig } from './vite.config.mjs'
 
 /**
  * MAIN world 注入脚本。

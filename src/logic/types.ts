@@ -185,10 +185,10 @@ export interface JobRecord {
 
 export type OutreachStatus
   = | 'found' // 已捕获
-  | 'scored' // 已评分
-  | 'skipped' // 分数不足
-  | 'drafted' // 已生成招呼语
-  | 'failed'
+    | 'scored' // 已评分
+    | 'skipped' // 分数不足
+    | 'drafted' // 已生成招呼语
+    | 'failed'
 
 // ---------------------------------------------------------------------------
 // 匹配结果

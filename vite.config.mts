@@ -1,16 +1,16 @@
 /// <reference types="vitest" />
 
-import { dirname, relative } from 'node:path'
 import type { UserConfig } from 'vite'
-import { defineConfig } from 'vite'
+import { dirname, relative } from 'node:path'
 import Vue from '@vitejs/plugin-vue'
-import Icons from 'unplugin-icons/vite'
-import IconsResolver from 'unplugin-icons/resolver'
-import Components from 'unplugin-vue-components/vite'
-import AutoImport from 'unplugin-auto-import/vite'
 import UnoCSS from 'unocss/vite'
-import { isDev, port, r } from './scripts/utils'
+import AutoImport from 'unplugin-auto-import/vite'
+import IconsResolver from 'unplugin-icons/resolver'
+import Icons from 'unplugin-icons/vite'
+import Components from 'unplugin-vue-components/vite'
+import { defineConfig } from 'vite'
 import packageJson from './package.json'
+import { isDev, port, r } from './scripts/utils'
 
 export const sharedConfig: UserConfig = {
   root: r('src'),
@@ -96,10 +96,9 @@ export default defineConfig(({ command }) => ({
     outDir: r('extension/dist'),
     emptyOutDir: false,
     sourcemap: isDev ? 'inline' : false,
-    // https://developer.chrome.com/docs/webstore/program_policies/#:~:text=Code%20Readability%20Requirements
-    terserOptions: {
-      mangle: false,
-    },
+    // 原先这里放了 terserOptions.mangle=false（原意是满足 Chrome 应用商店的代码可读性要求），
+    // 但 build.minify 默认是 esbuild，terserOptions 根本不生效，且 terser 也不是本项目依赖。
+    // Vite 8 收紧了它的类型，这段死配置会直接让 typecheck 失败，故移除。
     rollupOptions: {
       input: {
         options: r('src/options/index.html'),

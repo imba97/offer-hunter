@@ -1,8 +1,8 @@
 <script setup lang="ts">
+import type { AiSettings, MatchingSettings, Resume } from '~/logic/types'
 import { computed, ref } from 'vue'
 import { sendMessage } from 'webext-bridge/options'
 import { STORAGE_KEYS, useStoredValue } from '~/logic/storage'
-import type { AiSettings, MatchingSettings, Resume } from '~/logic/types'
 import {
   createDefaultAiSettings,
   createDefaultMatchingSettings,

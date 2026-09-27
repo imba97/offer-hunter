@@ -1,0 +1,11 @@
+minimumReleaseAgeExcludePrune: true
+trustPolicy: no-downgrade
+shellEmulator: true
+# pnpm 10+ 默认不执行依赖的构建脚本，需要在这里显式放行。
+# 参考 btools-vitesse/pnpm-workspace.yaml 的 allowBuilds 写法。
+allowBuilds:
+  # Vite / Vitest 依赖它的 postinstall 落位平台原生二进制
+  esbuild: true
+  simple-git-hooks: true
+  # @vueuse/core 依赖 vue-demi 的 postinstall 切换 Vue 版本分支
+  vue-demi: true

@@ -1,6 +1,6 @@
+import type { JobView } from '~/logic/types'
 import { reactive } from 'vue'
 import { sendMessage } from 'webext-bridge/content-script'
-import type { JobView } from '~/logic/types'
 import { JOB_DETAIL_API, toJobView } from '~/logic/boss/api'
 import { buildDomFallbackJob, getJdElement, readJdFromDom, readJobOutlineFromDom } from '~/logic/boss/dom'
 import { JOB_DETAIL_BOX, securityIdFromUrl } from '~/logic/boss/selectors'

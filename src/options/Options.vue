@@ -1,15 +1,15 @@
 <script setup lang="ts">
+import type { AiPlatformName, AiSettings, MatchingSettings, Resume } from '~/logic/types'
 import { computed, defineAsyncComponent, defineComponent, h, ref } from 'vue'
 import { sendMessage } from 'webext-bridge/options'
-import { AI_PLATFORM_OPTIONS } from '~/platform/ai/platforms'
-import { STORAGE_KEYS, resetAllStorage, useStoredValue } from '~/logic/storage'
-import type { AiPlatformName, AiSettings, MatchingSettings, Resume } from '~/logic/types'
+import logo from '~/assets/logo.png'
+import { resetAllStorage, STORAGE_KEYS, useStoredValue } from '~/logic/storage'
 import {
   createDefaultAiSettings,
   createDefaultMatchingSettings,
   createEmptyResume,
 } from '~/logic/types'
-import logo from '~/assets/logo.png'
+import { AI_PLATFORM_OPTIONS } from '~/platform/ai/platforms'
 
 /**
  * 设置页：简历维护 + 打招呼规则 + AI 平台配置。
@@ -65,9 +65,9 @@ function setPlatform(value: AiPlatformName) {
 
 type TestState
   = | { status: 'idle' }
-  | { status: 'testing' }
-  | { status: 'ok', provider: string, model: string, reply: string, latencyMs: number }
-  | { status: 'fail', error: string, provider?: string, model?: string }
+    | { status: 'testing' }
+    | { status: 'ok', provider: string, model: string, reply: string, latencyMs: number }
+    | { status: 'fail', error: string, provider?: string, model?: string }
 
 const test = ref<TestState>({ status: 'idle' })
 

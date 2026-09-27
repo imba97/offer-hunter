@@ -1,11 +1,6 @@
 /* eslint-disable no-console */
+import type { DiagnosticResult } from '~/logic/types'
 import { onMessage } from 'webext-bridge/content-script'
-import {
-  capturedApis,
-  currentJob,
-  installInjectedListener,
-  watchJdChanges,
-} from './state'
 import { fetchJobDetail, fetchJobView } from '~/logic/boss/api'
 import { buildDomFallbackJob, readJdFromDom, readJobOutlineFromDom } from '~/logic/boss/dom'
 import {
@@ -15,7 +10,12 @@ import {
   JOB_TITLE_SELECTORS,
   securityIdFromUrl,
 } from '~/logic/boss/selectors'
-import type { DiagnosticResult } from '~/logic/types'
+import {
+  capturedApis,
+  currentJob,
+  installInjectedListener,
+  watchJdChanges,
+} from './state'
 
 /**
  * 内容脚本（隔离世界）。

@@ -1,7 +1,7 @@
 import type { AiProtocol, AiProvider, AiProviderCapabilities, ProviderConfig } from '../types'
+import type { AiPlatformName } from '~/logic/types'
 import { createAnthropicProtocol } from '../protocols/anthropic'
 import { createOpenAIProtocol } from '../protocols/openai'
-import type { AiPlatformName } from '~/logic/types'
 
 /**
  * 平台预设表 + 工厂。

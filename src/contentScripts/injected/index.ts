@@ -126,13 +126,11 @@ window.fetch = function patchedFetch(
     promise
       .then((res) => {
         // 在 then 里就发起 clone().json()，保持与页面自身的消费时序一致
-        return res.clone().json()
-          .then((data) => {
-            record(url, res.ok, data)
-          })
-          .catch((e) => {
-            record(url, false, null, `parse: ${String(e)}`)
-          })
+        return res.clone().json().then((data) => {
+          record(url, res.ok, data)
+        }).catch((e) => {
+          record(url, false, null, `parse: ${String(e)}`)
+        })
       })
       .catch((e) => {
         record(url, false, null, `fetch: ${String(e)}`)

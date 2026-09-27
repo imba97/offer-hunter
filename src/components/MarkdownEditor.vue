@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
-import * as monaco from 'monaco-editor-core'
 import { shikiToMonaco } from '@shikijs/monaco'
+import * as monaco from 'monaco-editor-core'
 import { createHighlighterCore } from 'shiki/core'
 import { createJavaScriptRegexEngine } from 'shiki/engine/javascript'
-import vitesseDark from 'shiki/themes/vitesse-dark.mjs'
 import markdown from 'shiki/langs/markdown.mjs'
+import vitesseDark from 'shiki/themes/vitesse-dark.mjs'
+import { onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 
 /**
  * Markdown 编辑器：Monaco + Shiki 高亮。

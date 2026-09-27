@@ -1,5 +1,5 @@
-import { stripCssNoise } from './jd'
 import type { JobDetail, JobView } from '~/logic/types'
+import { stripCssNoise } from './jd'
 
 /**
  * BOSS 直聘接口封装。

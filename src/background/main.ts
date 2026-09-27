@@ -1,7 +1,6 @@
-import { onMessage, sendMessage } from 'webext-bridge/background'
 import type { JobSummary, JobView } from '~/logic/types'
-import { JOBS_PAGE_URL, isBossPageUrl } from '~/logic/boss/selectors'
-import { generateGreeting, matchJob, testAiConnection } from '~/platform/ai/matching'
+import { onMessage, sendMessage } from 'webext-bridge/background'
+import { isBossPageUrl, JOBS_PAGE_URL } from '~/logic/boss/selectors'
 import {
   ensureStorageDefaults,
   readAiSettings,
@@ -10,6 +9,7 @@ import {
   readResume,
   upsertRecord,
 } from '~/logic/storage'
+import { generateGreeting, matchJob, testAiConnection } from '~/platform/ai/matching'
 
 /**
  * 后台 service worker。

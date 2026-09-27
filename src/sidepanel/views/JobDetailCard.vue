@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
 import type { JobRecord, JobView } from '~/logic/types'
+import { computed, ref } from 'vue'
 import { createEmptyJobView } from '~/logic/types'
 
 /**
