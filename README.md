@@ -12,20 +12,17 @@ English | [简体中文](./README_CN.md)
   <img src="./extension/assets/icon-128.png" alt="Offer Hunter" width="128">
 </p>
 
-> A browser extension that scores how well your resume matches a job posting on BOSS Zhipin, then drafts a tailored opener for you. The extension never sends it — you copy, you paste, you click send.
-
-Offer Hunter lives in the browser's side panel, right next to the job you are already reading. It reads the full job description from the page, sends it together with your resume to an AI platform you control, and comes back with a 0–100 match score, the points that hit, and the skills you are missing. When the score clears your threshold, it writes a short opening message grounded in your real experience instead of generic pleasantries.
-
-It exists because applying well takes more time than applying fast. Reading a posting carefully, judging honestly whether you fit, and writing an opener that doesn't sound copy-pasted is exactly the work that gets skipped when you are 40 applications in. Offer Hunter does the reading and the drafting; the judgement about whether to actually reach out stays with you.
+Scores how well your resume matches a job posting on BOSS Zhipin, then drafts a tailored opener for you. It lives in the browser's side panel, sends nothing but the job you clicked and your own resume to the AI platform you configure, and never sends the message itself — you copy, you paste, you click send.
 
 ## Features
 
-- 🎯 **AI match scoring** — your resume against the JD, scored 0–100 with the hits and the gaps.
-- ✍️ **Tailored openers** — an opening message drawn from your real experience, with your own rules taking priority.
+- 🎯 **AI match scoring** — your resume against the JD, scored 0–100 with the hits, the reasons and the missing skills.
+- ✍️ **Tailored openers** — an opening message drawn from your real experience, with your own rules taking priority over the built-in ones.
 - 📋 **Copy, never send** — the opener goes to your clipboard; sending stays your click.
 - 🔌 **Your AI, your choice** — DeepSeek, OpenAI, Anthropic, Kimi, or a local model that keeps your resume on your machine.
 - 🧾 **Local job ledger** — jobs you already handled are recorded, so nothing is analysed or greeted twice.
 - 🧭 **Out of the page's way** — the UI lives in the browser's side panel and injects nothing into the BOSS page.
+- 🩺 **Built-in diagnostics** — one click re-verifies the page selectors and API contract, so a site change tells you exactly what broke.
 
 ## How it works
 
@@ -44,7 +41,7 @@ job JD (captured) ──┴──> AI match score
 
 ## Install
 
-Offer Hunter reads your resume and sends it to a third-party AI endpoint, so it is worth installing from a build you can inspect. Both options below are exactly that.
+Offer Hunter reads your resume and sends it to a third-party AI endpoint, so it is worth installing from a build you can inspect.
 
 ### Option 1 — Build from source
 
