@@ -43,7 +43,7 @@ function mountPicker(
     },
   })
 
-  // 模板里有两个 input：Gist 链接/ID、以及可选的 token
+  // 模板里有两个 input：Gist 链接/ID、以及可选的 token（都在 SecretInput 里）
   const [input, tokenInput] = wrapper.findAll('input')
 
   return { wrapper, input, tokenInput }
@@ -187,6 +187,19 @@ describe('gistPicker', () => {
     expect((input.element as HTMLInputElement).value).toBe(GIST_ID)
   })
 
+  it('输入框遮住 Gist 链接/ID（链接本身就是读简历的凭据）', () => {
+    // 摆在设置页上等于明文公开，所以和 token 一样按 password 渲染
+    const { wrapper, input, tokenInput } = mountPicker({ gistId: GIST_ID })
+
+    expect(input.attributes('type')).toBe('password')
+    expect(tokenInput.attributes('type')).toBe('password')
+
+    // 两个框各有一个小眼睛，且占位符没在换成 SecretInput 的路上丢掉
+    expect(wrapper.findAll('button.oh-secret-eye')).toHaveLength(2)
+    expect(input.attributes('placeholder')).toContain('gist.github.com')
+    expect(tokenInput.attributes('placeholder')).toBe('ghp_… / github_pat_…')
+  })
+
   it('输入框里输入 token 会写回配置', async () => {
     const { wrapper, tokenInput } = mountPicker({ gistId: GIST_ID })
 
@@ -273,7 +286,9 @@ describe('gistPicker', () => {
     await vi.advanceTimersByTimeAsync(DEBOUNCE_MS * 3)
     expect(callBackground).not.toHaveBeenCalled()
 
-    await wrapper.get('button').trigger('click')
+    // 两个密码框（Gist 链接/ID、可选 token）都是 SecretInput，里面各有一个小眼睛按钮，
+    // 所以这里按类名挑「同步简历」那个按钮，不能用 `get('button')`
+    await wrapper.get('button.oh-btn-primary').trigger('click')
     await vi.advanceTimersByTimeAsync(0)
 
     expect(callBackground).toHaveBeenCalledTimes(1)

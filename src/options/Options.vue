@@ -5,6 +5,7 @@ import logo from '~/assets/logo.png'
 import GistPicker from '~/components/GistPicker.vue'
 import PromptField from '~/components/PromptField.vue'
 import ScrollArea from '~/components/ScrollArea.vue'
+import SecretInput from '~/components/SecretInput.vue'
 import { callBackground } from '~/logic/messaging'
 import {
   getResumeSource,
@@ -380,13 +381,11 @@ async function clearAllData() {
 
         <label class="block">
           <span class="mb-1 block text-sm text-gray-600">API Key</span>
-          <input
+          <SecretInput
             v-model="ai.apiKey"
-            type="password"
-            class="oh-input font-mono"
+            class="font-mono"
             placeholder="sk-..."
-            autocomplete="off"
-          >
+          />
           <span class="mt-1 block text-xs text-amber-700">
             ⚠ 明文存在本机，能读浏览器数据的人就能拿到；建议用设了额度上限的 Key。
           </span>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { ResumeContent, ResumeSourceAdapter } from '~/logic/resume-sources/types'
 import { computed, ref, watch } from 'vue'
+import SecretInput from '~/components/SecretInput.vue'
 import { useResumeSourceSync } from '~/logic/resume-sources/useResumeSourceSync'
 import { parseGistId } from '~/platform/gist/gist'
 
@@ -168,15 +169,13 @@ function formatDateTime(iso: string): string {
   <div class="space-y-3 rounded-lg border border-gray-200 p-4">
     <label class="block">
       <span class="mb-1 block text-sm text-gray-600">Gist 链接或 ID</span>
-      <input
+      <SecretInput
         v-model="input"
-        class="oh-input font-mono"
+        class="font-mono"
         placeholder="https://gist.github.com/user/&lt;id&gt; 或直接填 ID"
-        autocomplete="off"
-        spellcheck="false"
         @blur="commitInput"
         @keydown="onKeydown"
-      >
+      />
       <span class="mt-1 block text-xs text-gray-400">
         填链接或 ID 即自动同步，不需要 token。粘链接会自动取出其中的 ID。
       </span>
@@ -193,14 +192,11 @@ function formatDateTime(iso: string): string {
         <span>Personal access token</span>
         <span class="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-500">可选</span>
       </span>
-      <input
+      <SecretInput
         v-model="token"
-        type="password"
-        class="oh-input font-mono"
+        class="font-mono"
         placeholder="ghp_… / github_pat_…"
-        autocomplete="off"
-        spellcheck="false"
-      >
+      />
       <span class="mt-1 block text-xs text-gray-400">
         填不填都能同步；填上只为提高额度：匿名 60 次/小时 → 5000 次/小时。
       </span>

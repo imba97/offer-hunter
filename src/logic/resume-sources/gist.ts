@@ -44,7 +44,9 @@ export const gistSource: ResumeSourceAdapter = {
   configFields: [
     {
       key: 'gistId',
-      type: 'text',
+      // 与自定义 UI（GistPicker 用 type="password" 遮住值）保持一致：Gist 链接
+      // 本身就是唯一的凭据，摆在设置页上等于明文公开，所以按 secret 渲染
+      type: 'secret',
       label: 'Gist 链接或 ID',
       placeholder: 'https://gist.github.com/user/<id> 或直接填 ID',
       hint: '填链接或 ID 即自动同步，不需要 token。粘链接会自动取出其中的 ID。',

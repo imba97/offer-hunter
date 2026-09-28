@@ -135,3 +135,32 @@ padding 就这么丢过一次，见上）。
 | `#hint` | 框下方的说明文字；**各字段要说的不一样**（拼进哪一轮提示词、优先级如何），所以交给调用方 |
 
 框高固定 `h-44`，内容超长由内部的 ScrollArea 滚；`textarea` 本身只负责长高（见上一节）。
+
+### SecretInput
+
+`SecretInput.vue` —— **所有密码框都用它**（Gist 链接/ID、Gist token、AI API Key）。
+默认用 `type="password"` 遮住内容，右侧一个小眼睛（`i-tabler-eye` / `i-tabler-eye-off`）
+切换明文，所以不要再手写 `<input type="password">`：那样没有「看一眼确认填对了」的路子。
+
+```vue
+<SecretInput v-model="ai.apiKey" class="font-mono" placeholder="sk-..." />
+```
+
+| prop / 事件 | 说明 |
+| --- | --- |
+| `v-model` | 输入值（`required`） |
+| 其余属性（`placeholder`、`class`、`@blur`、`@keydown`…） | **透传到内层 `input`**，与直接写在一个 input 上等价 |
+
+样式由组件自带（`.oh-secret-input`，与 `.oh-input` 同观感）。**不要传 `class="oh-input"`**：
+调用方的 `.oh-input` 写在各自的 `<style scoped>` 里，匹配不到子组件内部的元素
+（同上面 `scrollerClass` 的第 2 条限制），传了也不生效；要调字体就传全局工具类（如 `font-mono`）。
+
+两个已踩过的坑，改这个组件时别踩回去：
+
+1. `$attrs` 必须绑到内层 input（`inheritAttrs: false`）。绑在根 `div` 上时 `@blur` 会静默失效
+   —— blur 不冒泡，而 GistPicker 的「失焦才提交」正靠它。
+2. 因此**不要**在组件里声明 `placeholder` 之类的 prop：声明了它就从 `$attrs` 里消失，
+   而组件又没往 input 上绑，占位符会静默不见（这个是加组件时真实发生的）。
+3. 眼睛上带 `@mousedown.prevent`：点它时不让焦点离开输入框，否则会先触发一次失焦提交。
+4. 若某个面板里还有别的按钮，测试别再用 `wrapper.get('button')` 抓第一个按钮
+   —— 它现在是小眼睛（`button.oh-secret-eye`）；同步按钮请用 `button.oh-btn-primary`。
