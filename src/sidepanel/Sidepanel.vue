@@ -1,12 +1,10 @@
 <script setup lang="ts">
-import type { DiagnosticResult, JobRecord, JobView, MatchingSettings, MatchResult } from '~/logic/types'
+import type { DiagnosticResult, JobRecord, JobView, MatchResult } from '~/logic/types'
 import type { GreetingResult } from '~/platform/ai/matching'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import ScrollArea from '~/components/ScrollArea.vue'
 import { JOBS_PAGE_URL } from '~/logic/boss/selectors'
 import { callBackground } from '~/logic/messaging'
-import { STORAGE_KEYS, useStoredValue } from '~/logic/storage'
-import { createDefaultMatchingSettings } from '~/logic/types'
 import { MessageBox } from './message-box'
 import MessageBoxHost from './MessageBox.vue'
 import {
@@ -35,11 +33,6 @@ import QuickSettings from './views/QuickSettings.vue'
 
 type Tab = 'job' | 'diagnostics' | 'settings'
 const tab = ref<Tab>('job')
-
-const matching = useStoredValue<MatchingSettings>(
-  STORAGE_KEYS.matching,
-  createDefaultMatchingSettings,
-)
 
 /** 用户是否手动切换过标签 —— 自动跳转只在用户没干预时发生 */
 const userSwitchedTab = ref(false)
@@ -160,7 +153,6 @@ async function persist(patch: Partial<JobRecord>) {
     brandName: job.brandName,
     bossName: job.bossName,
     salaryDesc: job.salaryDesc,
-    status: existing?.status ?? 'found',
     match: existing?.match ?? null,
     greeting: existing?.greeting ?? null,
     error: null,
@@ -197,26 +189,19 @@ async function runMatch() {
     // 与 runGreeting 同理：`res.data as MatchResult` 这种断言正好绕过了「data 可能没有」，
     // 运行时会在 match.score 上炸成一句看不懂的报错，所以这里显式判空
     if (!res.ok || !res.data) {
-      await persist({ status: 'failed', error: res.error ?? '分析失败：没有拿到结果' })
+      await persist({ error: res.error ?? '分析失败：没有拿到结果' })
       MessageBox.update(pending, res.error ?? '分析失败：没有拿到结果', { kind: 'error' })
       return
     }
 
     const match = res.data
-    const threshold = matching.value.scoreThreshold
-    const passed = match.score >= threshold
-    await persist({ match, status: passed ? 'scored' : 'skipped', error: null })
-    MessageBox.update(
-      pending,
-      passed
-        ? `匹配度 ${match.score}（阈值 ${threshold}）：${match.summary}`
-        : `匹配度 ${match.score}，低于阈值 ${threshold}：${match.summary}`,
-      { kind: passed ? 'success' : 'info' },
-    )
+    await persist({ match, error: null })
+    // 只有一条成功提示：没有阈值判定，也就没有「达标 / 未达标」两套文案
+    MessageBox.update(pending, `匹配度 ${match.score}：${match.summary}`, { kind: 'success' })
   }
   catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
-    await persist({ status: 'failed', error: msg })
+    await persist({ error: msg })
     MessageBox.update(pending, msg, { kind: 'error' })
   }
   finally {
@@ -243,7 +228,7 @@ async function runGreeting() {
       MessageBox.update(pending, res.error ?? '生成失败：没有拿到招呼语内容', { kind: 'error' })
       return
     }
-    await persist({ greeting: res.data.greeting, status: 'drafted' })
+    await persist({ greeting: res.data.greeting })
     MessageBox.update(pending, '招呼语已生成，点「复制」后到 BOSS 粘贴发送', { kind: 'success' })
   }
   catch (error) {

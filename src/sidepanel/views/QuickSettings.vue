@@ -1,27 +1,23 @@
 <script setup lang="ts">
-import type { AiSettings, MatchingSettings, Resume } from '~/logic/types'
+import type { AiSettings, Resume } from '~/logic/types'
 import { computed, ref } from 'vue'
 import { callBackground } from '~/logic/messaging'
 import { STORAGE_KEYS, useStoredValue } from '~/logic/storage'
-import {
-  createDefaultAiSettings,
-  createDefaultMatchingSettings,
-  createEmptyResume,
-} from '~/logic/types'
+import { createDefaultAiSettings, createEmptyResume } from '~/logic/types'
 
 /**
  * 侧边栏的快捷设置。
  *
- * 定位：只放**经常需要临时调整**的参数（阈值、限额），调完继续操作不用跳页。
- * 简历、API Key、平台选择、招呼语提示词这类「配一次就不动」的内容都在设置页。
+ * 定位：只放**当前会话里要确认一眼**的东西 —— 两项就绪状态与连通性测试，
+ * 以及通往设置页的入口。简历、API Key、平台选择、招呼语提示词这类
+ * 「配一次就不动」的内容都在设置页。
+ *
+ * 曾经这里还有个「匹配阈值」滑块，那是自动流程的产物（低于阈值就跳过岗位）。
+ * 现在每一步都由用户自己决定，阈值没有消费方，已移除。
  */
 
 const ai = useStoredValue<AiSettings>(STORAGE_KEYS.ai, createDefaultAiSettings)
 const resume = useStoredValue<Resume>(STORAGE_KEYS.resume, createEmptyResume)
-const matching = useStoredValue<MatchingSettings>(
-  STORAGE_KEYS.matching,
-  createDefaultMatchingSettings,
-)
 
 const resumeReady = computed(() => resume.value.markdown.trim().length > 0)
 const aiReady = computed(() => (ai.value.apiKey ?? '').trim().length > 0)
@@ -106,26 +102,6 @@ function openOptions() {
       >
         <span class="i-tabler-alert-triangle mt-[1px] shrink-0 text-sm" />
         <span class="min-w-0 break-all">{{ testState.message }}</span>
-      </p>
-    </section>
-
-    <!-- 匹配阈值 -->
-    <section class="mb-4">
-      <h3 class="mb-1 font-medium text-gray-700">
-        匹配阈值
-      </h3>
-      <div class="flex items-center gap-2">
-        <input
-          v-model.number="matching.scoreThreshold"
-          type="range"
-          min="0"
-          max="100"
-          class="flex-1"
-        >
-        <span class="w-8 text-right font-medium text-teal-700">{{ matching.scoreThreshold }}</span>
-      </div>
-      <p class="mt-1 text-gray-400">
-        匹配度达到该值才建议生成招呼语。
       </p>
     </section>
 

@@ -161,7 +161,7 @@ async function clearAllData() {
             Offer Hunter
           </h1>
           <p class="text-sm text-gray-500">
-            自动在 BOSS 直聘找工作：AI 分析 JD 匹配度，匹配度高时生成定制打招呼语
+            在 BOSS 直聘上分析岗位与简历的匹配度，按需生成定制打招呼语 —— 每一步都由你手动触发，发送也由你来点
           </p>
         </div>
       </header>
@@ -246,28 +246,9 @@ async function clearAllData() {
           </p>
         </div>
 
-        <div class="space-y-4 rounded-lg bg-white p-6 shadow-sm">
-          <div>
-            <span class="mb-1 flex items-center justify-between text-sm text-gray-600">
-              <span>匹配度阈值</span>
-              <span class="font-medium text-teal-700">{{ matching.scoreThreshold }}</span>
-            </span>
-            <input
-              v-model.number="matching.scoreThreshold"
-              type="range"
-              min="0"
-              max="100"
-              class="w-full"
-            >
-            <p class="mt-1 text-xs text-gray-400">
-              匹配度达到该值才建议生成招呼语。
-            </p>
-          </div>
-
-          <div class="rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-            <strong>风控提示：</strong>短时间内高频打招呼、给同一人重复发消息，
-            都是平台风控的高危行为。建议从小额度开始观察账号状态。
-          </div>
+        <div class="rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+          <strong>风控提示：</strong>短时间内高频打招呼、给同一人重复发消息，
+          都是平台风控的高危行为。建议从小额度开始观察账号状态。
         </div>
       </section>
 

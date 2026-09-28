@@ -60,12 +60,17 @@ export function createEmptyResume(): Resume {
 }
 
 // ---------------------------------------------------------------------------
-// 招聘平台配置（阈值与限额，用户自己配，不设默认值）
+// 招呼语生成配置（用户自己配，不设默认值）
 // ---------------------------------------------------------------------------
 
+/**
+ * 只剩「招呼语怎么写」这一件事。
+ *
+ * 原本这里还有个「匹配度阈值」，唯一作用是自动流程里判定「分数不够就跳过
+ * 这个岗位」。自动化移除后它不参与任何逻辑（分数配色另有 85 / 75 / 60 的固定
+ * 分档），留着只会让人以为它在管着什么，所以一并删掉。
+ */
 export interface MatchingSettings {
-  /** 匹配度阈值，达到才建议生成招呼语 */
-  scoreThreshold: number
   /**
    * 生成招呼语时的自定义规则，会拼进生成用的 system prompt。
    *
@@ -77,7 +82,6 @@ export interface MatchingSettings {
 
 export function createDefaultMatchingSettings(): MatchingSettings {
   return {
-    scoreThreshold: 75,
     greetingPrompt: '',
   }
 }
@@ -166,8 +170,13 @@ export function createEmptyJobView(patch: Partial<JobView> = {}): JobView {
 /**
  * 岗位的本地记录（账本），以 securityId 为键。
  *
- * 这张表是刚需而非优化：没有它，同一岗位会被重复分析、重复触达，
- * 既浪费配额，也是风控触发点。
+ * 所有动作都由用户手动触发，所以这张表不是「待办队列」，而是**结果缓存**：
+ * 在岗位之间来回切换时，之前算过的匹配结果与生成过的招呼语要能原样回来，
+ * 不必每次重看都再烧一次 AI 配额。
+ *
+ * 刻意不记「状态」：那套状态机是为自动化流程（低于阈值自动跳过、自动推进到
+ * 下一步）服务的，自动化移除后没有任何消费方，只会在界面上冒出「已跳过」
+ * 这类用户既看不懂、也不需要关心的字样。
  */
 export interface JobRecord {
   securityId: string
@@ -175,30 +184,26 @@ export interface JobRecord {
   brandName: string
   bossName: string
   salaryDesc: string
-  status: OutreachStatus
   match: MatchResult | null
   greeting: string | null
-  /** 匹配或触达失败的原因 */
+  /** 匹配或生成失败的原因 */
   error: string | null
   firstSeen: string
 }
-
-export type OutreachStatus
-  = | 'found' // 已捕获
-    | 'scored' // 已评分
-    | 'skipped' // 分数不足
-    | 'drafted' // 已生成招呼语
-    | 'failed'
 
 // ---------------------------------------------------------------------------
 // 匹配结果
 // ---------------------------------------------------------------------------
 
-export type MatchVerdict = 'strong' | 'ok' | 'weak'
-
+/**
+ * 匹配结果。
+ *
+ * 刻意没有 verdict（strong / ok / weak）这样的档位字段：它既不参与任何逻辑，
+ * 界面上也从未展示过，等于每次分析都让模型多回一个没人看的字段。
+ * 分数本身已经有 85 / 75 / 60 的颜色分档来承担这个表达。
+ */
 export interface MatchResult {
   score: number
-  verdict: MatchVerdict
   /** 命中的要点，给用户看 */
   reasons: string[]
   /** 简历里缺失、但 JD 要求的技能 */

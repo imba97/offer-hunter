@@ -39,7 +39,6 @@ const showJd = ref(false)
 const match = computed(() => props.record?.match ?? null)
 const greeting = computed(() => props.record?.greeting ?? null)
 const error = computed(() => props.record?.error ?? null)
-const status = computed(() => props.record?.status ?? 'found')
 
 const scoreColor = computed(() => {
   const s = match.value?.score
@@ -52,17 +51,6 @@ const scoreColor = computed(() => {
   if (s >= 60)
     return 'text-amber-600'
   return 'text-red-500'
-})
-
-const statusLabel = computed(() => {
-  const map: Record<string, string> = {
-    found: '未处理',
-    scored: '已评分',
-    skipped: '已跳过',
-    drafted: '已生成',
-    failed: '失败',
-  }
-  return map[status.value] ?? status.value
 })
 
 const location = computed(() =>
@@ -104,12 +92,13 @@ const jdLines = computed(() => jdText.value.split('\n').filter(l => l.trim().len
           </div>
         </div>
 
+        <!--
+          分数右侧只有数字，不放「已跳过 / 已生成」这类状态字样：
+          那是自动化流程的产物，现在每一步都由用户自己决定，状态既无消费方也无意义。
+        -->
         <div v-if="match" class="shrink-0 text-right">
           <div class="text-2xl font-semibold leading-none" :class="scoreColor">
             {{ match.score }}
-          </div>
-          <div class="mt-1 text-[10px] text-gray-400">
-            {{ statusLabel }}
           </div>
         </div>
       </div>

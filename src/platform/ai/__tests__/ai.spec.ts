@@ -62,7 +62,7 @@ describe('normalizeScore', () => {
 })
 
 describe('normalizeMatchResult', () => {
-  it('正常返回原样保留，并按分数补出 verdict', () => {
+  it('正常返回原样保留', () => {
     const result = normalizeMatchResult({
       score: 88,
       summary: '很匹配',
@@ -71,7 +71,6 @@ describe('normalizeMatchResult', () => {
     })
 
     expect(result.score).toBe(88)
-    expect(result.verdict).toBe('strong')
     expect(result.reasons).toEqual(['技术栈吻合'])
     expect(result.missingSkills).toEqual(['Kubernetes'])
   })
@@ -82,7 +81,6 @@ describe('normalizeMatchResult', () => {
     expect(result.reasons).toEqual([])
     expect(result.missingSkills).toEqual([])
     expect(result.summary).toBe('')
-    expect(result.verdict).toBe('weak')
   })
 
   it('分数缺失时明确报错，而不是静默算 0 分', () => {

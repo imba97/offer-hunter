@@ -1,5 +1,6 @@
+import type { JobRecord } from '../types'
 import { describe, expect, it, vi } from 'vitest'
-import { mergeDefaults } from '../storage'
+import { mergeDefaults, stripRemovedRecordFields } from '../storage'
 import { createDefaultAiSettings, createDefaultMatchingSettings, createEmptyResume } from '../types'
 
 /**
@@ -45,10 +46,10 @@ describe('mergeDefaults', () => {
   })
 
   it('把早期被 JSON 字符串化的数据还原成对象', () => {
-    const legacy = JSON.stringify({ scoreThreshold: 60, greetingPrompt: '开头用您好' })
+    const legacy = JSON.stringify({ greetingPrompt: '开头用您好' })
     const merged = mergeDefaults(legacy, createDefaultMatchingSettings())
 
-    expect(merged).toEqual({ scoreThreshold: 60, greetingPrompt: '开头用您好' })
+    expect(merged).toEqual({ greetingPrompt: '开头用您好' })
   })
 
   it('字符串不是对象时不解析（避免把普通文本当成 JSON）', () => {
@@ -73,5 +74,33 @@ describe('mergeDefaults', () => {
   it('嵌套对象逐层合并', () => {
     const merged = mergeDefaults({ a: { b: 2 } }, { a: { b: 1, c: 3 } })
     expect(merged).toEqual({ a: { b: 2, c: 3 } })
+  })
+})
+
+/**
+ * 账本迁移：mergeDefaults 对动态键映射不做裁剪，所以被删掉的字段（status）
+ * 只能靠这个函数抹掉，否则会永远跟着存量数据写回存储。
+ */
+describe('stripRemovedRecordFields', () => {
+  it('抹掉已删除的 status，并报告发生了改动', () => {
+    const records = {
+      a: { securityId: 'a', status: 'skipped', jobName: '前端' },
+      b: { securityId: 'b', status: 'drafted' },
+      c: { securityId: 'c' },
+    } as unknown as Record<string, JobRecord>
+
+    expect(stripRemovedRecordFields(records)).toBe(true)
+    // 只动 status，其他字段与本来就没有该字段的记录原样保留
+    expect(records).toEqual({
+      a: { securityId: 'a', jobName: '前端' },
+      b: { securityId: 'b' },
+      c: { securityId: 'c' },
+    })
+  })
+
+  it('账本里已经没有旧字段时不报告改动（迁移保持幂等）', () => {
+    const records = { a: { securityId: 'a', match: null } } as unknown as Record<string, JobRecord>
+
+    expect(stripRemovedRecordFields(records)).toBe(false)
   })
 })

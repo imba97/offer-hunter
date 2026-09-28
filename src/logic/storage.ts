@@ -138,7 +138,7 @@ export function writeResume(value: Resume): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// 匹配与安全设置
+// 招呼语生成配置
 // ---------------------------------------------------------------------------
 
 export function readMatchingSettings(): Promise<MatchingSettings> {
@@ -309,6 +309,30 @@ export function useStoredValue<T extends object>(
 }
 
 /**
+ * 抹掉账本记录里已经删掉的字段。
+ *
+ * 账本是动态键映射，mergeDefaults 对它不做裁剪（fallback 没有键，一裁就会把
+ * 整张表清空），所以「删掉一个字段」这件事只能在这里手工补一刀 —— 不管的话，
+ * 存量记录里的旧字段会一直留着，还会被写回存储。
+ *
+ * 目前要抹的是 `status`：自动化流程（已跳过 / 已生成招呼语）的遗留字段，
+ * 已从 JobRecord 中移除，界面上也不再有任何消费方。
+ *
+ * 导出是为了单测：这是迁移逻辑，出错时的症状（旧字段永远跟着存量数据）离原因很远。
+ */
+export function stripRemovedRecordFields(all: Record<string, JobRecord>): boolean {
+  let changed = false
+  for (const record of Object.values(all)) {
+    const legacy = record as JobRecord & { status?: unknown }
+    if (legacy.status === undefined)
+      continue
+    delete legacy.status
+    changed = true
+  }
+  return changed
+}
+
+/**
  * 把所有存储键补上默认值，并把已有数据里缺失的字段补齐。
  *
  * 由 service worker 每次启动时调用，保证：
@@ -316,6 +340,7 @@ export function useStoredValue<T extends object>(
  *  2. 旧数据（字符串格式 / 字段不全 / 换过格式）被就地迁移，用户不需要手动清存储
  *  3. useStoredValue 不需要「载入完成前不回写」的守卫
  *     —— 那个守卫会和 watch 抢时序，导致改动被静默丢弃
+ *  4. 账本里已经删掉的字段（如 status）被抹掉，而不是永远跟着存量数据
  *
  * 迁移是幂等的：第二次运行会因为 JSON 完全一致而跳过写入。
  */
@@ -345,11 +370,13 @@ export async function ensureStorageDefaults(): Promise<void> {
   if (JSON.stringify(matching) !== JSON.stringify(existing[KEY_MATCHING]))
     patch[KEY_MATCHING] = matching
 
-  if (existing[KEY_RECORDS] === undefined
+  // 账本：既要兼容历史上被字符串化的数据，也要抹掉已删除的字段
+  const recordsNeedWrite = existing[KEY_RECORDS] === undefined
     || existing[KEY_RECORDS] === null
-    || typeof existing[KEY_RECORDS] === 'string') {
-    patch[KEY_RECORDS] = mergeDefaults(existing[KEY_RECORDS], {})
-  }
+    || typeof existing[KEY_RECORDS] === 'string'
+  const records = mergeDefaults(existing[KEY_RECORDS], {}) as Record<string, JobRecord>
+  if (recordsNeedWrite || stripRemovedRecordFields(records))
+    patch[KEY_RECORDS] = records
 
   if (Object.keys(patch).length === 0)
     return

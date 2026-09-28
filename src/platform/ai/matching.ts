@@ -1,4 +1,4 @@
-import type { AiSettings, JobSummary, MatchResult, MatchVerdict, Resume } from '~/logic/types'
+import type { AiSettings, JobSummary, MatchResult, Resume } from '~/logic/types'
 import type { AiProvider } from '~/platform/ai/platforms'
 import type { PingResult } from '~/platform/ai/types'
 import { createAiProvider } from '~/platform/ai/platforms'
@@ -118,14 +118,6 @@ export function normalizeScore(value: unknown): number | null {
   return Math.round(Math.min(100, Math.max(0, scaled)))
 }
 
-function verdictOf(score: number, value: unknown): MatchVerdict {
-  if (value === 'strong' || value === 'ok' || value === 'weak')
-    return value
-  if (score >= 85)
-    return 'strong'
-  return score >= 60 ? 'ok' : 'weak'
-}
-
 /**
  * 校验并归一化模型返回的匹配结果。
  *
@@ -143,7 +135,6 @@ export function normalizeMatchResult(raw: unknown): MatchResult {
 
   return {
     score,
-    verdict: verdictOf(score, data.verdict),
     summary: typeof data.summary === 'string' ? data.summary.trim() : '',
     reasons: stringList(data.reasons, 8),
     missingSkills: stringList(data.missingSkills, 8),
@@ -165,7 +156,6 @@ const MATCH_SYSTEM = `你是一位资深的技术招聘顾问，擅长判断候�
 const MATCH_SCHEMA_HINT = `json 结构：
 {
   "score": 0-100 的整数,
-  "verdict": "strong" | "ok" | "weak",
   "summary": "一句话结论，30 字以内",
   "reasons": ["命中要点，每条一句话，2-5 条"],
   "missingSkills": ["简历中缺失但岗位要求的技能，0-5 条"]
