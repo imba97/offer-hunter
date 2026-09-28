@@ -67,7 +67,7 @@ const GIST_ID = /^[0-9a-f]{5,64}$/i
  * 把用户输入收敛成 Gist ID。
  *
  * 用户很可能直接粘贴浏览器的地址栏内容，所以链接也要认：
- *   https://gist.github.com/imba97/aa5a315d61ae9438b18d#file-resume-md
+ *   https://gist.github.com/<user>/<id>#file-resume-md
  * 认不出来时返回空串，由调用方给出提示 —— 不猜。
  */
 export function parseGistId(input: string): string {

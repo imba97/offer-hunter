@@ -160,7 +160,7 @@ describe('gistPicker', () => {
   it('粘贴 gist 链接：失焦时收敛成 ID', async () => {
     const { wrapper, input } = mountPicker()
 
-    await input.setValue(`https://gist.github.com/imba97/${GIST_ID}#file-resume-md`)
+    await input.setValue(`https://gist.github.com/octocat/${GIST_ID}#file-resume-md`)
     await input.trigger('blur')
 
     expect(lastUpdate(wrapper)).toMatchObject({ gistId: GIST_ID, fileName: '' })

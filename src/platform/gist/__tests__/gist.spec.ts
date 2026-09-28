@@ -57,19 +57,19 @@ describe('parseGistId', () => {
   })
 
   it('从 gist.github.com 链接里取 ID（有无用户名、带 #file- 锚点、带查询串）', () => {
-    expect(parseGistId(`https://gist.github.com/imba97/${GIST_ID}`)).toBe(GIST_ID)
+    expect(parseGistId(`https://gist.github.com/octocat/${GIST_ID}`)).toBe(GIST_ID)
     expect(parseGistId(`https://gist.github.com/${GIST_ID}`)).toBe(GIST_ID)
-    expect(parseGistId(`https://gist.github.com/imba97/${GIST_ID}#file-resume-md`)).toBe(GIST_ID)
-    expect(parseGistId(`http://gist.github.com/imba97/${GIST_ID}?plain=1`)).toBe(GIST_ID)
+    expect(parseGistId(`https://gist.github.com/octocat/${GIST_ID}#file-resume-md`)).toBe(GIST_ID)
+    expect(parseGistId(`http://gist.github.com/octocat/${GIST_ID}?plain=1`)).toBe(GIST_ID)
   })
 
   it('认不出来时返回空串（不猜）', () => {
     expect(parseGistId('')).toBe('')
     expect(parseGistId('  ')).toBe('')
     expect(parseGistId('resume')).toBe('')
-    expect(parseGistId('https://github.com/imba97/offer-hunter')).toBe('')
+    expect(parseGistId('https://github.com/octocat/hello-world')).toBe('')
     // 非十六进制的路径段不是 ID
-    expect(parseGistId('https://gist.github.com/imba97/not-a-hex-id')).toBe('')
+    expect(parseGistId('https://gist.github.com/octocat/not-a-hex-id')).toBe('')
   })
 })
 
@@ -174,7 +174,7 @@ describe('fetchGistContent', () => {
   it('粘贴链接也能同步（ID 会被收敛）', async () => {
     stubFetch(gistResponse({ 'resume.md': { filename: 'resume.md', size: 5, content: '# 我' } }))
 
-    const content = await fetchGistContent({ gistId: `https://gist.github.com/imba97/${GIST_ID}` })
+    const content = await fetchGistContent({ gistId: `https://gist.github.com/octocat/${GIST_ID}` })
 
     expect(content.gistId).toBe(GIST_ID)
   })

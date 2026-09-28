@@ -264,7 +264,7 @@ function formatDateTime(iso: string): string {
       <input
         v-model="input"
         class="oh-input font-mono"
-        placeholder="https://gist.github.com/imba97/aa5a315d61ae9438b18d 或直接填 ID"
+        placeholder="https://gist.github.com/user/&lt;id&gt; 或直接填 ID"
         autocomplete="off"
         spellcheck="false"
         @blur="commitInput"

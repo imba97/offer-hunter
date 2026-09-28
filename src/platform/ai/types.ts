@@ -1,8 +1,7 @@
 /**
  * AI 协议层类型：定义 wire 格式（请求体/响应体长什么样）。
  *
- * 参照 D:\Projects\imba97-me 的三层架构（protocol → platform → factory）。
- * 分层职责：
+ * 分三层（protocol → platform → factory）：
  *   protocol  只关心 wire 格式（OpenAI /chat/completions、Anthropic /v1/messages）
  *   platform  由 platforms/index.ts 的声明式预设表选定协议 + 声明平台能力
  *   factory   按平台名构造 provider
