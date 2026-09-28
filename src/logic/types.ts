@@ -326,11 +326,11 @@ export function jobIdentity(view: Pick<JobView, 'job' | 'site' | 'jdText'>): Sit
 /**
  * 给「站点给不出标识」的岗位算一个本地身份（前缀 `~`）。
  *
- * 内容脚本在造 DOM 兜底岗位时用它**定下**身份，之后只更新内容、不改身份
- * （见 sites/content-script.ts）：否则页面正文一增量渲染就换了个身份，
- * 用户刚分析过的结果会凭空消失。
+ * 由 `jobIdentity` 使用，而 `jobIdentity` 又被 DOM 兜底骨架
+ * （sites/dom-fallback.ts）用来在造视图时**定下**身份：之后只更新内容、不改身份，
+ * 否则页面正文一增量渲染就换了个身份，用户刚分析过的结果会凭空消失。
  */
-export function localJobKey(view: Pick<JobView, 'job' | 'jdText'> | { title?: string, jdText: string }): string {
+function localJobKey(view: Pick<JobView, 'job' | 'jdText'> | { title?: string, jdText: string }): string {
   return `~${contentDigest(view)}`
 }
 

@@ -1,5 +1,7 @@
+import type { SiteDomOutline } from '../types'
 import type { JobView } from '~/logic/types'
-import { createEmptyJobView } from '~/logic/types'
+import { buildDomFallbackView, preferText } from '../dom-fallback'
+import { BOSS_SITE_ID } from '../site-descriptors'
 import { extractCleanText } from './jd'
 import {
   JOB_COMPANY_SELECTORS,
@@ -43,12 +45,6 @@ export function readJdFromDom(): string | null {
   return text.length > 0 ? text : null
 }
 
-/** DOM 里能读到的岗位标识（薪资等字段 DOM 是加密乱码，读不到） */
-export interface DomJobOutline {
-  jobName: string
-  brandName: string
-}
-
 /**
  * DOM 兜底时拿不到岗位名，用这句占位，避免面板出现空白标题。
  *
@@ -88,7 +84,7 @@ function firstShortText(scope: Element, selectors: string[]): string {
  *
  * ⚠ 只读不猜：找不到就返回空串，交给调用方保留占位/接口数据。
  */
-export function readJobOutlineFromDom(): DomJobOutline {
+export function readJobOutlineFromDom(): SiteDomOutline {
   const box = document.querySelector(JOB_DETAIL_BOX)
   if (!box)
     return { jobName: '', brandName: '' }
@@ -99,12 +95,6 @@ export function readJobOutlineFromDom(): DomJobOutline {
   }
 }
 
-/** 已有值优先（占位标题不算「已有」），其次 DOM 读到的，最后退回 fallback */
-function prefer(primary: string | undefined, secondary: string | undefined, fallback: string): string {
-  const existing = primary && primary !== EMPTY_JOB_NAME ? primary : ''
-  return existing || secondary || fallback
-}
-
 /**
  * 用 DOM 里读到的 JD 造一个最小岗位视图。
  *
@@ -113,20 +103,26 @@ function prefer(primary: string | undefined, secondary: string | undefined, fall
  * 沿用旧岗位的公司名/薪资会张冠李戴，甚至把新 JD 记到旧岗位的账本上。
  *
  * `outline` 是刚从 DOM 读到的岗位名/公司名，只在 base 里没有可用值时生效。
+ *
+ * 标题兜底、站点身份、来源标记这三条不变量在共用的骨架里（sites/dom-fallback.ts），
+ * 这里只声明 BOSS 自己的差异：占位文案、公司名怎么合并、招聘者为什么不继承。
  */
 export function buildDomFallbackJob(
   jdText: string,
   base?: Partial<JobView> | null,
-  outline?: DomJobOutline | null,
+  outline?: SiteDomOutline | null,
 ): JobView {
-  const baseJob = base?.job
-
-  return createEmptyJobView({
-    job: {
+  return buildDomFallbackView({
+    siteId: BOSS_SITE_ID,
+    emptyTitle: EMPTY_JOB_NAME,
+    jdText,
+    base,
+    outline,
+    job: (title, baseJob) => ({
       ...baseJob,
-      title: prefer(baseJob?.title, outline?.jobName, EMPTY_JOB_NAME),
+      title,
       // 占位/空公司名归一成 undefined，让「没有」只有一种表示
-      company: prefer(baseJob?.company, outline?.brandName, '') || undefined,
+      company: preferText({ current: baseJob?.company, fromDom: outline?.brandName }) || undefined,
       /*
        * 招聘者刻意**不**从 base 继承。
        *
@@ -136,14 +132,6 @@ export function buildDomFallbackJob(
        * 复用的是同一个坑，只是招聘者是从 job 对象里整个带过来的，更隐蔽）。
        */
       recruiter: undefined,
-    },
-    // 站点身份沿用 base（含接口给的私有 id），只补 naturalKey
-    site: {
-      siteId: 'boss',
-      ...base?.site,
-      naturalKey: base?.site?.naturalKey ?? '',
-    },
-    jdText,
-    source: 'dom',
+    }),
   })
 }

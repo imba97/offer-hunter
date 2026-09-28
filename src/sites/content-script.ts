@@ -1,8 +1,8 @@
 import type { JobSiteAdapter } from './types'
-import type { DiagnosticResult, JobView } from '~/logic/types'
+import type { DiagnosticResult } from '~/logic/types'
 import { reactive } from 'vue'
 import { onMessage, sendMessage } from 'webext-bridge/content-script'
-import { jobIdentity, localJobKey, recordKey } from '~/logic/types'
+import { jobIdentity, recordKey } from '~/logic/types'
 
 /**
  * 内容脚本的**站点无关**主体。
@@ -116,31 +116,6 @@ export function createContentScript(site: JobSiteAdapter): () => void {
         capturedApis.push(entry)
       else
         capturedApis[idx] = entry
-    }
-  }
-
-  /**
-   * 造一个 DOM 兜底岗位。
-   *
-   * ⚠ 站点给不出标识时（BOSS 新版职位页的地址里没有 securityId，而详情可能是
-   *   服务端渲染、没有可捕获的接口响应），**在这里把身份定下来**：
-   *   页面上正文是增量渲染的，若每次读都按当下内容重算身份，用户刚分析过的结果
-   *   会凭空消失（面板按新身份查不到旧记录）。
-   *
-   *   身份一旦定下就随岗位走：后续更新走 `base`（同一个岗位）时天然沿用；
-   *   认出来是另一个岗位才会重新定。
-   */
-  function buildDomFallbackView(
-    jd: string,
-    base?: Partial<JobView> | null,
-    outline?: { jobName: string, brandName: string } | null,
-  ): JobView {
-    const view = site.buildDomFallback(jd, base, outline)
-    if (view.site.naturalKey)
-      return view
-    return {
-      ...view,
-      site: { ...view.site, naturalKey: localJobKey({ title: view.job.title, jdText: view.jdText }) },
     }
   }
 
@@ -292,12 +267,16 @@ export function createContentScript(site: JobSiteAdapter): () => void {
       if (existing && sameJob) {
         if (jd.length <= existing.jdText.length)
           return
-        currentJob.value = buildDomFallbackView(jd, existing, outline)
+        currentJob.value = site.buildDomFallback(jd, existing, outline)
       }
       else {
-        // 此前没有岗位，或是在 DOM 数据之间切换：重置身份，只带 URL 上的标识
+        /*
+         * 此前没有岗位，或是在 DOM 数据之间切换：重置身份，只带 URL 上的标识。
+         * 地址上没有标识时，共用的兜底骨架会按岗位内容定一个本地身份并钉住它
+         * （见 sites/dom-fallback.ts）—— 没有身份就没有账本键。
+         */
         const naturalKey = site.naturalKeyFromUrl(window.location.href)
-        currentJob.value = buildDomFallbackView(
+        currentJob.value = site.buildDomFallback(
           jd,
           naturalKey ? { site: site.emptyRef(naturalKey) } : null,
           outline,
@@ -474,7 +453,7 @@ export function createContentScript(site: JobSiteAdapter): () => void {
       ? currentJob.value
       : (naturalKey ? { site: site.emptyRef(naturalKey) } : null)
 
-    currentJob.value = buildDomFallbackView(domJd, base, site.readOutline())
+    currentJob.value = site.buildDomFallback(domJd, base, site.readOutline())
   }
 
   /**

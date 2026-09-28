@@ -1,5 +1,6 @@
+import type { SiteDomOutline } from '../types'
 import type { JobView } from '~/logic/types'
-import { createEmptyJobView } from '~/logic/types'
+import { buildDomFallbackView } from '../dom-fallback'
 import { ELEDUCK_SITE_ID } from '../site-descriptors'
 import { isJobPostPage, POST_BODY, readPostTitle } from './selectors'
 
@@ -13,19 +14,13 @@ import { isJobPostPage, POST_BODY, readPostTitle } from './selectors'
  * 与 BOSS 那份的差别：BOSS 的 DOM 是「接口没捕获到时的兜底」，这里是主路径。
  */
 
-/** DOM 里能读到的岗位信息（公司/薪资在电鸭帖子里是自由文本，不结构化提取） */
-export interface DomJobOutline {
-  jobName: string
-  brandName: string
-}
-
 /**
  * DOM 兜底时拿不到标题，用这句占位，避免面板出现空白标题。
  *
  * 放在站点侧而不是通用模型里：这句文案描述的是「这个站点的标题没读到」，
  * 各家说法未必一样，不该由 JobCore 承担。
  */
-export const EMPTY_JOB_NAME = '（未能读到帖子标题）'
+const EMPTY_JOB_NAME = '（未能读到帖子标题）'
 
 /**
  * 文本归一化：按行 trim、丢掉空行、去掉零宽字符。
@@ -90,16 +85,10 @@ export function readJdFromDom(): string | null {
  * 电鸭的帖子标题就是岗位标题（前面的分类名由 readPostTitle 摘掉）。
  * 非招聘帖返回空串 —— 不给下游留下「这一页算不算岗位」的判断余地。
  */
-export function readJobOutlineFromDom(): DomJobOutline {
+export function readJobOutlineFromDom(): SiteDomOutline {
   if (!isJobPostPage())
     return { jobName: '', brandName: '' }
   return { jobName: readPostTitle(), brandName: '' }
-}
-
-/** 已有值优先（占位标题不算「已有」），其次 DOM 读到的，最后退回 fallback */
-function prefer(primary: string | undefined, secondary: string | undefined, fallback: string): string {
-  const existing = primary && primary !== EMPTY_JOB_NAME ? primary : ''
-  return existing || secondary || fallback
 }
 
 /**
@@ -107,28 +96,26 @@ function prefer(primary: string | undefined, secondary: string | undefined, fall
  *
  * `base` 是「同一个岗位的已有数据」：能保留就保留，但**不能跨岗位复用** ——
  * 用户点开另一个帖子而这里没认出来时，沿用旧标题会把新 JD 记到旧岗位账上。
+ *
+ * 标题兜底、站点身份、来源标记这三条不变量在共用的骨架里（sites/dom-fallback.ts），
+ * 这里只声明电鸭自己的差异：只带标题与公司（薪资/地点在帖子里是自由文本，不结构化提取）。
  */
 export function buildDomFallbackJob(
   jdText: string,
   base?: Partial<JobView> | null,
-  outline?: DomJobOutline | null,
+  outline?: SiteDomOutline | null,
 ): JobView {
-  const baseJob = base?.job
-  const title = prefer(baseJob?.title, outline?.jobName, EMPTY_JOB_NAME)
-
-  return createEmptyJobView({
-    job: {
+  return buildDomFallbackView({
+    siteId: ELEDUCK_SITE_ID,
+    emptyTitle: EMPTY_JOB_NAME,
+    jdText,
+    base,
+    outline,
+    job: (title, baseJob) => ({
       // 只带标题：公司 / 薪资 / 地点在电鸭帖子里是自由文本，不做结构化提取
       title,
       // 标题变了说明已经是另一个帖子，不能把上一个帖子的字段带过来
       company: title === baseJob?.title ? baseJob?.company : undefined,
-    },
-    site: {
-      siteId: ELEDUCK_SITE_ID,
-      ...base?.site,
-      naturalKey: base?.site?.naturalKey ?? '',
-    },
-    jdText,
-    source: 'dom',
+    }),
   })
 }

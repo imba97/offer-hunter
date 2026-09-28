@@ -52,12 +52,26 @@ export interface SiteSelectorProbe {
   selector: string
 }
 
+/**
+ * DOM 里能读到的那点岗位信息。
+ *
+ * 只有这两个字段：薪资、学历这类结构化字段 DOM 给不出来（BOSS 在页面上是字体
+ * 加密的乱码、电鸭的帖子里是自由文本），所以它们不属于这个形状。
+ *
+ * 单独起个名字而不是到处写内联字面量：它同时出现在诊断结果、适配器的读函数
+ * 与兜底构造的入参上，散着写就有五行各写一遍的机会。
+ */
+export interface SiteDomOutline {
+  jobName: string
+  brandName: string
+}
+
 /** 诊断结果里站点自己贡献的那部分 */
 export interface SiteDiagnostic {
   /** 逐个选择器的命中情况 */
   selectors: SiteSelectorProbe[]
   /** DOM 兜底读到的岗位标识（空串表示关键词选择器没命中，需要按真机调整） */
-  domOutline?: { jobName: string, brandName: string }
+  domOutline?: SiteDomOutline
   /** JD 长度 */
   jdLength: number
 }
@@ -108,14 +122,19 @@ interface JobSiteAdapterBase {
    * 时能通过 isConnected 立刻发现观察器已失联。
    */
   jdContainerElement: () => Element | null
-  /** 用 DOM 读到的 JD 造一个最小岗位视图 */
+  /**
+   * 用 DOM 读到的 JD 造一个最小岗位视图。
+   *
+   * 实现请走 `sites/dom-fallback.ts` 的骨架（标题兜底、站点身份、来源标记三条
+   * 不变量都在那里），站点只负责拼自己的 `job` 字段。
+   */
   buildDomFallback: (
     jdText: string,
     base?: Partial<JobView> | null,
-    outline?: { jobName: string, brandName: string } | null,
+    outline?: SiteDomOutline | null,
   ) => JobView
   /** DOM 兜底能读到的岗位名与公司名 */
-  readOutline: () => { jobName: string, brandName: string }
+  readOutline: () => SiteDomOutline
 
   /**
    * 内容脚本用的共享状态辅助。
