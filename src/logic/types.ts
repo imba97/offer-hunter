@@ -1,3 +1,5 @@
+import type { ResumeSourceId } from './resume-sources/types'
+
 /**
  * 全局领域模型。storage / content-script / background 三方共享，
  * 因此这里不引入任何运行时依赖，只放类型与默认值。
@@ -34,36 +36,10 @@ export function createDefaultAiSettings(): AiSettings {
 // ---------------------------------------------------------------------------
 
 /**
- * 简历来源。
- *
- * 曾经还预留过 `'pdf'`，但 PDF 导入一直没做 —— 下拉框里摆一个点不动的选项，
- * 只会让人以为「选了 PDF 就会导入」。等导入器真做出来再加回去。
+ * 简历来源标识与适配器契约都在 logic/resume-sources 下（那套是可插拔的）。
+ * 这里只做类型转出，让 storage / 内容脚本继续从「全局领域模型」这一个地方取类型。
  */
-export type ResumeSourceId = 'paste' | 'gist'
-
-/**
- * Gist 同步配置。
- *
- * 没有 token 也能用：**读某一个 Gist 不需要任何凭据**（secret Gist 是「不被列出」
- * 而不是「要授权」，谁有链接谁能看）。token 是**可选**的，只为一件事 —— 把 GitHub
- * 接口的额度从匿名的每小时 60 次提升到每小时 5000 次。它不参与 AI 请求。
- */
-export interface GistSource {
-  /** 可选的 GitHub Personal access token，只为提额度；留空即匿名请求 */
-  token: string
-  /** Gist ID；粘贴 gist.github.com 链接时由 parseGistId 收敛成 ID */
-  gistId: string
-  /** 要同步的文件名；留空表示按文件名自动挑一个（见 pickResumeFile） */
-  fileName: string
-}
-
-export function createEmptyGistSource(): GistSource {
-  return {
-    token: '',
-    gistId: '',
-    fileName: '',
-  }
-}
+export type { ResumeSourceId } from './resume-sources/types'
 
 /**
  * 简历。
@@ -82,17 +58,29 @@ export interface Resume {
   markdown: string
   /** 当前生效的来源；null 是历史数据（当时还没有来源概念），按手动输入处理 */
   sourceId: ResumeSourceId | null
-  /** Gist 同步配置（来源为手动输入时保留但不使用） */
-  gist: GistSource
-  /** 最近一次从 Gist 成功同步的时间 */
+  /**
+   * 各来源的配置，按来源 id 分组。
+   *
+   * 此前这里是 `gist: GistSource` 这样的**强类型兄弟字段**，加第二个来源就得往
+   * Resume 上加一个字段、改 createEmptyResume、再改迁移逻辑。现在来源是可插拔的
+   * （见 logic/resume-sources），域模型不能提前知道有哪些来源，只能给一张映射表。
+   *
+   * 用 `Partial` 是因为旧数据里未必每个来源都有配置；读取时由适配器的
+   * createConfig() 补齐（见 storage.ts 的迁移）。
+   */
+  sources: Partial<Record<ResumeSourceId, Record<string, unknown>>>
+  /** 最近一次成功同步的时间 */
   syncedAt: string | null
   /**
-   * 最近一次同步的是哪一份内容，形如 `<gistId>|<fileName>`，与 syncedAt 同时写入。
+   * 最近一次同步的是哪一份内容（适配器给出的 contentKey），与 syncedAt 同时写入。
    *
    * 存在的意义：只有知道那个时间属于哪一份内容，才能判断「现在这份是不是刚取过」——
-   * 否则换了 Gist 之后，新 Gist 会被旧 Gist 的同步时间挡住，看起来像坏掉了。
+   * 否则换了来源内容之后，新的会被旧的同步时间挡住，看起来像坏掉了。
+   *
+   * 此前这个值由调用方手工拼成 `<gistId>|<fileName>`；现在由适配器自己算，
+   * 上层只做字符串比较，不需要知道它由几个字段构成。
    */
-  syncedFrom: string | null
+  syncedKey: string | null
   updatedAt: string | null
 }
 
@@ -100,21 +88,11 @@ export function createEmptyResume(): Resume {
   return {
     markdown: '',
     sourceId: null,
-    gist: createEmptyGistSource(),
+    sources: {},
     syncedAt: null,
-    syncedFrom: null,
+    syncedKey: null,
     updatedAt: null,
   }
-}
-
-/**
- * 把存储里的来源收敛成当前支持的两种之一。
- *
- * 存储里可能是 null（早于来源概念的旧数据）、也可能残留已废弃的值（如 `'pdf'`），
- * 这些一律按「手动输入」处理 —— 那正是它们原本的行为。
- */
-export function normalizeResumeSource(value: unknown): ResumeSourceId {
-  return value === 'gist' ? 'gist' : 'paste'
 }
 
 // ---------------------------------------------------------------------------
@@ -163,10 +141,14 @@ export function createDefaultPromptSettings(): PromptSettings {
 /**
  * 招聘网站标识。
  *
- * 目前只有 BOSS 一家。多站点接入后新增站点的适配器各自用自己的 id，
- * 上层（匹配分析、侧边栏）**不需要认识这些 id**，它们只读 JobCore。
+ * 刻意是**开放字符串**而不是字面量联合：站点是可插拔的（见 src/sites/），
+ * 而领域模型不该反过来知道有哪些站点 —— 闭合联合会逼着「加一个站点」还要改这里，
+ * 那正是这次重构要消掉的那种耦合。
+ *
+ * 代价是拼错 id 不会被编译器拦住，改由 src/sites/__tests__ 的两条不变量兜底：
+ * id 在注册表内唯一、且与 sites/<id>/ 目录名一致。
  */
-export type SiteId = 'boss'
+export type SiteId = string
 
 /**
  * 站点身份与站点私有数据。

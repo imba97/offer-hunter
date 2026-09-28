@@ -1,4 +1,5 @@
 import type { Ref } from 'vue'
+import type { ResumeSourceId } from './resume-sources/types'
 import type {
   AiSettings,
   JobRecord,
@@ -7,6 +8,7 @@ import type {
 } from './types'
 import { getCurrentScope, onScopeDispose, ref, watch } from 'vue'
 import { storage } from 'webextension-polyfill'
+import { RESUME_SOURCES } from './resume-sources/registry'
 import {
   createDefaultAiSettings,
   createDefaultPromptSettings,
@@ -139,6 +141,76 @@ export function readResume(): Promise<Resume> {
 
 export function writeResume(value: Resume): Promise<void> {
   return storage.local.set({ [KEY_RESUME]: value })
+}
+
+/**
+ * 补齐每个来源自己的配置对象。
+ *
+ * 新增一个来源时，存量用户的 `sources` 里没有这个键；设置页的字段是
+ * `v-model` 直接绑到 `sources[id][field]` 上的，读到 undefined 就会在渲染期炸。
+ * 因此**每个已注册来源都必须有一份完整形状的配置**，哪怕它从没被用过。
+ *
+ * 未被使用的来源只是多存一个空对象，代价可忽略；换来的是「加来源不用写迁移」。
+ */
+export function ensureSourceConfigs(
+  sources: Partial<Record<ResumeSourceId, Record<string, unknown>>> | undefined,
+): Record<string, Record<string, unknown>> {
+  const out: Record<string, Record<string, unknown>> = {}
+  for (const adapter of RESUME_SOURCES) {
+    // 以适配器的 createConfig 为准合并：它是什么形状，结果就是什么形状
+    out[adapter.id] = { ...adapter.createConfig(), ...(sources?.[adapter.id] ?? {}) }
+  }
+  return out
+}
+
+/**
+ * 把「简历来源还是硬编码的 gist 字段」那个版本的存量数据迁到今天的分组形状。
+ *
+ * 要迁三处（都是**改名/搬家**，不改语义）：
+ *   `resume.gist`       → `resume.sources.gist`
+ *   `resume.syncedFrom` → `resume.syncedKey`
+ *   缺失的其它来源配置 → 由 createConfig 补出
+ *
+ * 之所以必须做：`resume.gist` 里的 gistId / fileName / token 是用户手填的，
+ * 丢了就得重新配；而 `syncedFrom` 丢了会让「刚同步过就别再取」的判断失效
+ * （表现是每次打开设置页都重取一次，白烧 GitHub 额度）。
+ *
+ * 幂等：已经迁过的数据再跑一次不会改动任何东西（返回原对象引用）。
+ * 导出是为了单测 —— 迁移出错的症状（配置莫名清空）离原因很远。
+ */
+export function migrateResumeShape(raw: unknown): { value: unknown, changed: boolean } {
+  if (typeof raw !== 'object' || raw === null)
+    return { value: raw, changed: false }
+
+  const source = raw as Record<string, unknown>
+  const legacyGist = source.gist
+  const hasLegacyGist = typeof legacyGist === 'object' && legacyGist !== null
+  const hasLegacySynced = source.syncedFrom !== undefined
+  const sources = source.sources
+
+  if (!hasLegacyGist && !hasLegacySynced)
+    return { value: raw, changed: false }
+
+  const next: Record<string, unknown> = { ...source }
+
+  if (hasLegacyGist) {
+    // 只在还没迁过时填，避免覆盖新形状里已有的配置
+    const merged = ensureSourceConfigs({
+      ...(typeof sources === 'object' && sources !== null
+        ? sources as Partial<Record<ResumeSourceId, Record<string, unknown>>>
+        : {}),
+      gist: legacyGist as Record<string, unknown>,
+    })
+    next.sources = merged
+    delete next.gist
+  }
+
+  if (hasLegacySynced) {
+    next.syncedKey = source.syncedFrom
+    delete next.syncedFrom
+  }
+
+  return { value: next, changed: true }
 }
 
 // ---------------------------------------------------------------------------
@@ -367,8 +439,24 @@ export async function ensureStorageDefaults(): Promise<void> {
     patch[KEY_AI] = ai
 
   const resume = mergeDefaults(existing[KEY_RESUME], createEmptyResume())
-  if (JSON.stringify(resume) !== JSON.stringify(existing[KEY_RESUME]))
-    patch[KEY_RESUME] = resume
+  /*
+   * 两步走：先 mergeDefaults 补齐缺失字段，再跑一次命名迁移。
+   *
+   * 顺序不能反：mergeDefaults 只认 fallback 声明过的键（`sources` / `syncedKey`），
+   * 而存量数据里是 `gist` / `syncedFrom` —— 它会把这两个旧键直接裁掉。
+   * 所以必须在裁掉**之前**把它们读出来搬过去。
+   */
+  const migrated = migrateResumeShape(existing[KEY_RESUME])
+  const resumeNext = migrated.changed
+    ? mergeDefaults(migrated.value, createEmptyResume())
+    : resume
+  // 每个已注册来源都要有完整形状的配置，否则设置页 v-model 会读到 undefined
+  const resumeWithSources: Resume = {
+    ...resumeNext,
+    sources: ensureSourceConfigs(resumeNext.sources),
+  }
+  if (JSON.stringify(resumeWithSources) !== JSON.stringify(existing[KEY_RESUME]))
+    patch[KEY_RESUME] = resumeWithSources
 
   const prompts = mergeDefaults(existing[KEY_PROMPTS], createDefaultPromptSettings())
   if (JSON.stringify(prompts) !== JSON.stringify(existing[KEY_PROMPTS]))

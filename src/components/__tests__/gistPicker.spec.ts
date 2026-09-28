@@ -1,6 +1,7 @@
 import { mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { callBackground } from '~/logic/messaging'
+import { gistSource } from '~/logic/resume-sources/gist'
 import GistPicker from '../GistPicker.vue'
 
 /**
@@ -11,29 +12,34 @@ import GistPicker from '../GistPicker.vue'
  *  - 自动同步必须防抖（输入框是敲出来的，不该每敲一个字符发一次请求）
  *  - 回写文件名不能把自己再点着（否则同步 → 写回 → 同步 会成回环）
  *  - 输入框既能填裸 ID，也能粘链接；认不出来时不要改坏配置
+ *
+ * 编排本身（防抖 / 节流 / 状态机 / 经后台取数）已经搬到 useResumeSourceSync，
+ * 所以本文件同时也是那个 composable 的集成测试 —— 只有把组件和它放在一起
+ * 才能观察到这些行为。
  */
 
 vi.mock('~/logic/messaging', () => ({ callBackground: vi.fn() }))
 
 const GIST_ID = 'aa5a315d61ae9438b18d'
 
-/** 自动同步的防抖窗口（组件里的 AUTO_SYNC_DEBOUNCE_MS）+ 一点余量 */
+/** 自动同步的防抖窗口 + 一点余量 */
 const DEBOUNCE_MS = 400
 
-/** 一份内容的标识，与组件里 sourceKey 的约定一致 */
+/** 一份内容的标识：由适配器给出，与它内部的 buildGistContentKey 一致 */
 function sourceKey(gistId: string, fileName = ''): string {
   return `${gistId}|${fileName}`
 }
 
 function mountPicker(
   config: Partial<{ token: string, gistId: string, fileName: string }> = {},
-  synced: { syncedAt?: string | null, syncedFrom?: string | null } = {},
+  synced: { syncedAt?: string | null, syncedKey?: string | null } = {},
 ) {
   const wrapper = mount(GistPicker, {
     props: {
+      adapter: gistSource,
       config: { token: '', gistId: '', fileName: '', ...config },
       syncedAt: synced.syncedAt ?? null,
-      syncedFrom: synced.syncedFrom ?? null,
+      syncedKey: synced.syncedKey ?? null,
     },
   })
 
@@ -48,9 +54,17 @@ function lastUpdate(wrapper: ReturnType<typeof mountPicker>['wrapper']) {
   return emitted ? emitted[emitted.length - 1][0] : null
 }
 
-/** 一次成功的同步响应 */
-function okFetch(markdown = '# 我', fileName = 'resume.md', files = ['resume.md', 'notes.md']) {
-  return { ok: true, gistId: GIST_ID, fileName, markdown, files }
+/** 一次成功的同步响应：后台把适配器的结果包在 content 里 */
+function okFetch(markdown = '# 我', fileName = 'resume.md', items = ['resume.md', 'notes.md']) {
+  return {
+    ok: true,
+    content: {
+      markdown,
+      contentKey: sourceKey(GIST_ID, fileName),
+      label: fileName,
+      items,
+    },
+  }
 }
 
 beforeEach(() => {
@@ -78,15 +92,14 @@ describe('gistPicker', () => {
 
     await vi.advanceTimersByTimeAsync(DEBOUNCE_MS)
 
-    expect(callBackground).toHaveBeenCalledWith('gist-fetch', {
-      gistId: GIST_ID,
-      fileName: '',
-      token: '',
+    expect(callBackground).toHaveBeenCalledWith('resume-source:fetch', {
+      sourceId: 'gist',
+      config: { token: '', gistId: GIST_ID, fileName: '' },
     })
     expect(wrapper.emitted('synced')?.[0]).toEqual([
-      { markdown: '# 我', gistId: GIST_ID, fileName: 'resume.md' },
+      { markdown: '# 我', contentKey: sourceKey(GIST_ID, 'resume.md'), label: 'resume.md' },
     ])
-    expect(wrapper.text()).toContain('已同步 3 字 · 文件 resume.md')
+    expect(wrapper.text()).toContain('已同步 3 字 · resume.md')
   })
 
   it('填了 token 就随请求带上（只为提额度）', async () => {
@@ -95,10 +108,9 @@ describe('gistPicker', () => {
     const { wrapper } = mountPicker({ gistId: GIST_ID, token: ' ghp_x ' })
     await vi.advanceTimersByTimeAsync(DEBOUNCE_MS)
 
-    expect(callBackground).toHaveBeenCalledWith('gist-fetch', {
-      gistId: GIST_ID,
-      fileName: '',
-      token: 'ghp_x',
+    expect(callBackground).toHaveBeenCalledWith('resume-source:fetch', {
+      sourceId: 'gist',
+      config: { token: ' ghp_x ', gistId: GIST_ID, fileName: '' },
     })
     expect(wrapper.text()).toContain('可选')
   })
@@ -141,10 +153,9 @@ describe('gistPicker', () => {
     await wrapper.setProps({ config: lastUpdate(wrapper) as never })
     await vi.advanceTimersByTimeAsync(DEBOUNCE_MS)
 
-    expect(callBackground).toHaveBeenCalledWith('gist-fetch', {
-      gistId: GIST_ID,
-      fileName: 'notes.md',
-      token: '',
+    expect(callBackground).toHaveBeenCalledWith('resume-source:fetch', {
+      sourceId: 'gist',
+      config: { token: '', gistId: GIST_ID, fileName: 'notes.md' },
     })
   })
 
@@ -190,7 +201,7 @@ describe('gistPicker', () => {
       { gistId: GIST_ID },
       {
         syncedAt: new Date('2026-03-01T11:55:00Z').toISOString(), // 5 分钟前
-        syncedFrom: sourceKey(GIST_ID),
+        syncedKey: sourceKey(GIST_ID),
       },
     )
 
@@ -208,7 +219,7 @@ describe('gistPicker', () => {
       { gistId: GIST_ID },
       {
         syncedAt: new Date('2026-03-01T11:49:00Z').toISOString(),
-        syncedFrom: sourceKey(GIST_ID),
+        syncedKey: sourceKey(GIST_ID),
       },
     )
 
@@ -225,7 +236,7 @@ describe('gistPicker', () => {
       { gistId: 'bb5a315d61ae9438b18d' },
       {
         syncedAt: new Date('2026-03-01T11:59:00Z').toISOString(), // 1 分钟前，但属于另一个 Gist
-        syncedFrom: sourceKey(GIST_ID),
+        syncedKey: sourceKey(GIST_ID),
       },
     )
 
@@ -256,7 +267,7 @@ describe('gistPicker', () => {
       { gistId: GIST_ID },
       {
         syncedAt: new Date('2026-03-01T11:59:00Z').toISOString(),
-        syncedFrom: sourceKey(GIST_ID),
+        syncedKey: sourceKey(GIST_ID),
       },
     )
     await vi.advanceTimersByTimeAsync(DEBOUNCE_MS * 3)
@@ -269,14 +280,15 @@ describe('gistPicker', () => {
     expect(wrapper.text()).toContain('已同步 3 字')
   })
 
-  it('同步成功时把来源一起交给调用方（间隔判断要靠它）', async () => {
+  it('同步成功时把来源标识一起交给调用方（间隔判断要靠它）', async () => {
     vi.mocked(callBackground).mockResolvedValue(okFetch())
 
     const { wrapper } = mountPicker({ gistId: GIST_ID })
     await vi.advanceTimersByTimeAsync(DEBOUNCE_MS)
 
+    // 调用方（Options.vue）就是拿这个值写 resume.syncedKey 的
     expect(wrapper.emitted('synced')?.[0]).toEqual([
-      { markdown: '# 我', gistId: GIST_ID, fileName: 'resume.md' },
+      { markdown: '# 我', contentKey: sourceKey(GIST_ID, 'resume.md'), label: 'resume.md' },
     ])
   })
 

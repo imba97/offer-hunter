@@ -1,7 +1,7 @@
 import type { JobCore, JobRecord, JobView, MatchResult } from '~/logic/types'
 import { onMessage, sendMessage } from 'webext-bridge/background'
-import { isBossPageUrl, JOBS_PAGE_URL } from '~/logic/boss/selectors'
 import { broadcastToPages, handleBackgroundRequests } from '~/logic/messaging'
+import { getResumeSource } from '~/logic/resume-sources/registry'
 import {
   ensureStorageDefaults,
   readAiSettings,
@@ -11,7 +11,7 @@ import {
   upsertRecord,
 } from '~/logic/storage'
 import { generateGreeting, matchJob, testAiConnection } from '~/platform/ai/matching'
-import { fetchGistContent } from '~/platform/gist/gist'
+import { detectSite, SITE_DESCRIPTORS } from '~/sites/routing'
 
 /**
  * 后台 service worker。
@@ -22,8 +22,11 @@ import { fetchGistContent } from '~/platform/gist/gist'
  *     且 SW 有 host_permissions 的跨源豁免，不受 CORS 约束
  *  3. 账本读写
  *  4. **为侧边栏转发请求到内容脚本** —— 侧边栏没有页面访问权，
- *     而 /wapi/ 接口必须携带页面 Cookie，只能由内容脚本代发
- *  5. GitHub Gist 拉取 —— 简历可以放在 Gist 里（见 platform/gist/gist.ts，无需凭据）
+ *     而需要页面 Cookie 的接口只能由内容脚本代发（见站点适配器的 needsPageCookie）
+ *  5. 简历来源取数（可插拔，见 logic/resume-sources）
+ *
+ * ⚠ 本文件**不得出现任何具体站点名或域名**：站点判断一律经 sites/registry。
+ *   这是「加第二个招聘网站时这里不用改」的保证。
  *
  * 两条消息通道，按「有没有 tabId」分工，别混用：
  *  · 扩展页面（侧边栏 / 设置页）→ 后台：原生 runtime.sendMessage，
@@ -77,15 +80,18 @@ if (chromeSidePanel?.setPanelBehavior) {
 }
 
 /**
- * 点击图标时若不在 BOSS 页面，则跳转到职位页。
+ * 点击图标时若不在任何支持的招聘网站上，则跳转到职位页。
  *
- * 在 BOSS 页面上不做任何事 —— 让 setPanelBehavior 的原生开合逻辑生效。
+ * 在支持的站点上不做任何事 —— 让 setPanelBehavior 的原生开合逻辑生效。
  */
 browser.action.onClicked.addListener(async (tab) => {
   try {
-    if (isBossPageUrl(tab.url))
+    if (detectSite(tab.url))
       return
-    await browser.tabs.create({ url: JOBS_PAGE_URL })
+    // 单站点时就是它的职位页；多站点时取第一个（用户可在设置里再切）
+    const target = SITE_DESCRIPTORS[0]
+    if (target)
+      await browser.tabs.create({ url: target.jobsPageUrl })
   }
   catch (error) {
     console.error('[offer-hunter] action click failed', error)
@@ -97,28 +103,25 @@ browser.action.onClicked.addListener(async (tab) => {
 // ---------------------------------------------------------------------------
 
 /**
- * 找到目标标签页并发消息。
+ * 转发消息给**指定标签页**的内容脚本。
  *
- * 优先当前窗口的活动标签；若它不是 BOSS 页面，则回退到任意一个 BOSS 标签页 ——
- * 用户可能把侧边栏停在一边、在另一个标签里操作。
+ * ⚠ 目标标签页由**面板**决定（消息里带 tabId），后台不自己去找。
+ *
+ * 这里曾经是「先看本窗口活动标签，不是站点就全局找任意一个站点标签页」。
+ * 那个全局回退造成一个用户可见的 bug：从 BOSS 职位页切到别的页面后，
+ * 面板仍然显示着岗位 —— 后台从另一个残留的站点标签页把岗位取回来了。
+ * 面板表达的是「你现在看的这个标签页上的岗位」，跟着别的标签页走是错的。
+ *
+ * 现在面板先确认自己那个标签页是本站点，再把 tabId 交过来；
+ * 两边口径完全一致，不可能再各说各话。
  */
-async function findTargetTabId(): Promise<number | null> {
-  const [active] = await browser.tabs.query({ active: true, currentWindow: true })
-  if (active?.id !== undefined && isBossPageUrl(active.url))
-    return active.id
-
-  const all = await browser.tabs.query({ url: '*://*.zhipin.com/*' })
-  const first = all.find(t => t.id !== undefined)
-  return first?.id ?? null
-}
-
 async function relayToContent<T>(
   messageId: string,
   data: unknown,
+  tabId: number | undefined,
 ): Promise<{ ok: true, value: T } | { ok: false, reason: string }> {
-  const tabId = await findTargetTabId()
-  if (tabId === null)
-    return { ok: false, reason: '没有找到 BOSS 直聘页面，请先打开职位页' }
+  if (typeof tabId !== 'number')
+    return { ok: false, reason: '面板没有给出目标标签页' }
 
   try {
     const value = await sendMessage(messageId as never, data as never, {
@@ -129,22 +132,23 @@ async function relayToContent<T>(
   }
   catch (error) {
     const detail = errorText(error)
-    return { ok: false, reason: `页面通信失败：${detail}（可尝试刷新 BOSS 页面）` }
+    return { ok: false, reason: `页面通信失败：${detail}（可尝试刷新页面）` }
   }
 }
 
-async function onRelayCurrentJob(data: { force?: boolean }) {
+async function onRelayCurrentJob(data: { force?: boolean, tabId?: number }) {
   const res = await relayToContent<{ job: JobView | null, url: string }>(
     'request-current-job',
     { force: Boolean(data?.force) },
+    data?.tabId,
   )
   if (!res.ok)
     return { ok: false as const, reason: res.reason }
   return { ok: true as const, job: res.value?.job ?? null }
 }
 
-async function onRelayDiagnostic() {
-  const res = await relayToContent<unknown>('run-diagnostic', {})
+async function onRelayDiagnostic(data: { tabId?: number }) {
+  const res = await relayToContent<unknown>('run-diagnostic', {}, data?.tabId)
   if (!res.ok)
     return { ok: false as const, reason: res.reason }
   return { ok: true as const, result: res.value as never }
@@ -225,26 +229,27 @@ async function onAiGreeting(data: { job: JobCore, jdText: string, match?: MatchR
 }
 
 // ---------------------------------------------------------------------------
-// GitHub Gist（简历来源）
+// 简历来源（可插拔）
 // ---------------------------------------------------------------------------
 
 /**
- * Gist 请求为什么也走后台：
+ * 简历来源的取数为什么也走后台：
  *
  * 与 AI 调用同一条规矩 —— 出网请求只经过后台，扩展页面侧只发消息。
- * 读 Gist 本身不需要凭据；token 是可选的，只用来把接口额度从匿名 60 次/小时
- * 提升到 5000 次/小时（见 platform/gist/gist.ts）。
+ * 后台有 host_permissions 的跨源豁免，且凭据（如 Gist token）不必下发到页面。
+ *
+ * 这条消息是**按注册表路由**的，而不是给每个来源写一条：
+ * 新增简历来源只加一个适配器文件 + 注册一行，本文件不用改。
+ * 消息名形如 `resume-source:fetch`，data 里带 `sourceId` 选适配器。
  */
-async function onGistFetch(data: { gistId?: string, fileName?: string, token?: string }) {
+async function onResumeSourceFetch(data: { sourceId?: string, config?: Record<string, unknown> }) {
+  const adapter = getResumeSource(data?.sourceId ?? '')
+  if (!adapter) {
+    return { ok: false as const, error: `未知的简历来源：${data?.sourceId ?? '(空)'}` }
+  }
+
   try {
-    return {
-      ok: true as const,
-      ...await fetchGistContent({
-        gistId: data?.gistId ?? '',
-        fileName: data?.fileName ?? '',
-        token: data?.token ?? '',
-      }),
-    }
+    return { ok: true as const, content: await adapter.fetch(data?.config ?? {}) }
   }
   catch (error) {
     return { ok: false as const, error: errorText(error) }
@@ -278,9 +283,9 @@ handleBackgroundRequests({
   'ai-test': () => onAiTest(),
   'ai-match': data => onAiMatch(data),
   'ai-greeting': data => onAiGreeting(data),
-  'gist-fetch': data => onGistFetch(data),
+  'resume-source:fetch': data => onResumeSourceFetch(data),
   'get-records': () => onGetRecords(),
   'upsert-record': data => onUpsertRecord(data),
   'relay-current-job': data => onRelayCurrentJob(data),
-  'relay-diagnostic': () => onRelayDiagnostic(),
+  'relay-diagnostic': data => onRelayDiagnostic(data),
 })

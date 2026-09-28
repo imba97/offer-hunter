@@ -1,17 +1,21 @@
 <script setup lang="ts">
 import type { AiPlatformName, AiSettings, PromptSettings, Resume, ResumeSourceId } from '~/logic/types'
-import { computed, defineAsyncComponent, defineComponent, h, ref } from 'vue'
+import { computed, defineAsyncComponent, defineComponent, h, markRaw, ref } from 'vue'
 import logo from '~/assets/logo.png'
 import GistPicker from '~/components/GistPicker.vue'
 import PromptField from '~/components/PromptField.vue'
 import ScrollArea from '~/components/ScrollArea.vue'
 import { callBackground } from '~/logic/messaging'
+import {
+  getResumeSource,
+  normalizeResumeSource,
+  resumeSourceOptions,
+} from '~/logic/resume-sources/registry'
 import { resetAllStorage, STORAGE_KEYS, useStoredValue } from '~/logic/storage'
 import {
   createDefaultAiSettings,
   createDefaultPromptSettings,
   createEmptyResume,
-  normalizeResumeSource,
 } from '~/logic/types'
 import { AI_PLATFORM_OPTIONS } from '~/platform/ai/platforms'
 
@@ -19,8 +23,8 @@ import { AI_PLATFORM_OPTIONS } from '~/platform/ai/platforms'
  * 设置页：简历维护 + 提示词 + AI 平台配置。
  *
  * 独立标签页打开，空间充足（侧边栏太窄，放不下编辑器与完整表单）。
- * 简历有两种来源：直接在编辑器里写（手动输入），或从一个 GitHub Gist 同步
- * （见 components/GistPicker.vue）。PDF 导入仍未实现（见 README 的路线图）。
+ * 简历来源是**可插拔的**（见 logic/resume-sources）：下拉框由注册表驱动，
+ * 加一个新来源不需要改本文件 —— 只有来源自己那点表单界面要另写一个小组件。
  *
  * 存储统一走 logic/storage 的 useStoredValue，保证与 service worker 侧
  * 读写格式一致（模板自带的 composable 会把值序列化成字符串，导致后台读不到）。
@@ -138,17 +142,52 @@ const resumeMode = computed<ResumeSourceId>({
   set: value => (resume.value.sourceId = value),
 })
 
+/** 当前来源的适配器 */
+const activeSource = computed(() => getResumeSource(resumeMode.value))
+
+/** 下拉框选项：由注册表驱动，加来源不需要改这里 */
+const sourceOptions = resumeSourceOptions()
+
+/** 当前来源的配置对象；切换来源时立刻造出完整形状，避免表单读到 undefined */
+const activeConfig = computed<Record<string, unknown>>(() => {
+  const id = resumeMode.value
+  return resume.value.sources[id] ?? getResumeSource(id)?.createConfig() ?? {}
+})
+
 /**
- * Gist 同步完成：只写「内容来源与时间」，配置（token / gistId / 文件名）由
- * GistPicker 自己通过 v-model:config 写回 —— 两边各管一半，不会互相覆盖。
+ * 哪些来源有自定义表单组件。
+ *
+ * 刻意做成查找表而不是放进适配器：适配器要被**后台**导入来做消息路由，
+ * 一旦把 .vue 组件挂在适配器上，后台包就会平白多出编辑器级的依赖。
+ * 因此「纯逻辑在 logic/，界面在 components/」这条分界必须守住。
  */
-function onGistSynced(payload: { markdown: string, gistId: string, fileName: string }) {
+const SOURCE_PICKERS: Partial<Record<ResumeSourceId, unknown>> = {
+  gist: GistPicker,
+}
+
+const ActiveSourcePicker = computed(() => {
+  const component = SOURCE_PICKERS[resumeMode.value]
+  return component ? markRaw(component as never) : null
+})
+
+function updateSourceConfig(patch: Record<string, unknown>): void {
+  resume.value.sources[resumeMode.value] = patch
+}
+
+/**
+ * 来源同步成功：只写「内容与来源标识」，配置由来源组件自己通过 v-model:config
+ * 写回 —— 两边各管一半，不会互相覆盖。
+ */
+function onSourceSynced(payload: { markdown: string, contentKey: string, label?: string }) {
   const now = new Date().toISOString()
-  resume.value.sourceId = 'gist'
+  const changed = resume.value.markdown !== payload.markdown
+  resume.value.sourceId = resumeMode.value
   resume.value.markdown = payload.markdown
   resume.value.syncedAt = now
-  resume.value.syncedFrom = `${payload.gistId}|${payload.fileName}`
-  resume.value.updatedAt = now
+  resume.value.syncedKey = payload.contentKey
+  // 只有内容真的变了才动 updatedAt，否则自动同步会一直刷新「更新于」
+  if (changed)
+    resume.value.updatedAt = now
 }
 
 // ---------------------------------------------------------------------------
@@ -232,17 +271,28 @@ async function clearAllData() {
         <label class="block">
           <span class="mb-1 block text-sm text-gray-600">简历来源</span>
           <select v-model="resumeMode" class="oh-input">
-            <option value="paste">手动编辑（Markdown）</option>
-            <option value="gist">GitHub Gist 同步</option>
+            <option v-for="opt in sourceOptions" :key="opt.value" :value="opt.value">
+              {{ opt.label }}
+            </option>
           </select>
+          <span v-if="activeSource?.hint" class="mt-1 block text-xs text-gray-400">
+            {{ activeSource.hint }}
+          </span>
         </label>
 
-        <GistPicker
-          v-if="resumeMode === 'gist'"
-          v-model:config="resume.gist"
+        <!--
+          来源自己的表单：只有配了自定义组件的来源才渲染它。
+          「手动输入」没有远端可取，因此没有组件 —— 内容直接由下面的编辑器维护。
+        -->
+        <component
+          :is="ActiveSourcePicker"
+          v-if="ActiveSourcePicker"
+          :adapter="activeSource"
+          :config="activeConfig"
           :synced-at="resume.syncedAt"
-          :synced-from="resume.syncedFrom"
-          @synced="onGistSynced"
+          :synced-key="resume.syncedKey"
+          @update:config="updateSourceConfig"
+          @synced="onSourceSynced"
         />
 
         <div>

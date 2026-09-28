@@ -270,6 +270,19 @@ async function readApiMessage(res: Response): Promise<string> {
 }
 
 /**
+ * 一份 Gist 内容的稳定标识：同一个 Gist 的同一个文件才算同一份。
+ *
+ * 存在的意义是取代此前散在两处手工拼接的 `` `${gistId}|${fileName}` ``：
+ * Options.vue 负责写入、GistPicker.vue 负责比较，任何一处改了写法另一处就静默失配
+ * —— 症状是「同一份内容每次打开设置页都重取」或者「换了内容却不重取」。
+ *
+ * 收敛成一个函数后，适配器与界面比较的是同一个字符串。
+ */
+export function buildGistContentKey(gistId: string, fileName: string): string {
+  return `${gistId}|${fileName}`
+}
+
+/**
  * 取一个 Gist 的简历全文。
  *
  * `gistId` 可以是 ID，也可以是 `gist.github.com` 链接。

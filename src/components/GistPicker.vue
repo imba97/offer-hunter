@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import type { GistSource } from '~/logic/types'
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
-import { callBackground } from '~/logic/messaging'
+import type { ResumeContent, ResumeSourceAdapter } from '~/logic/resume-sources/types'
+import { computed, ref, watch } from 'vue'
+import { useResumeSourceSync } from '~/logic/resume-sources/useResumeSourceSync'
 import { parseGistId } from '~/platform/gist/gist'
 
 /**
@@ -15,36 +15,36 @@ import { parseGistId } from '~/platform/gist/gist'
  * 而是按匿名请求返回全站公开 Gist，表现成「只拉到了公开的」。为了少一个字段、
  * 也为了不替用户保管 GitHub 凭据，这里只留 ID 输入。
  *
- * 三个不显眼但重要的决定：
+ * 同步编排（去抖 / 节流 / 状态机 / 经后台取数）已经抽到
+ * logic/resume-sources/useResumeSourceSync —— 那部分与「是 Gist 还是 PDF」无关。
+ * 本组件只保留 Gist 自己知道的东西：**输入框怎么规范化、文件怎么换**。
  *
- * 1. **列表由后台代取**（见 background/main.ts 的 onGistFetch）：扩展页面侧不发跨源请求。
- * 2. **配置一变化就自动同步**：改 ID、换文件、甚至只是切到这个标签页，内容都该是新的。
- *    用 syncedKeys 记住「已经同步过的组合」，否则「同步 → 回写文件名 → 再同步」会成回环；
- *    另外同一个 Gist 在 10 分钟内只自动取一次，免得来回开关设置页白白烧 GitHub 额度。
- * 3. **输入框失焦（或回车）时才提交**，而不是边打边发请求 —— ID 是敲进去的，
- *    每敲一个字符就请求一次会连吃一串 404。
+ * 一个不显眼但重要的决定：**输入框失焦（或回车）时才提交**，而不是边打边发请求
+ * —— ID 是敲进去的，每敲一个字符就请求一次会连吃一串 404。
  */
 
 const props = defineProps<{
-  config: GistSource
+  /** 来源适配器（由注册表提供，这里只用来取 fetch/identify 与字段声明） */
+  adapter: ResumeSourceAdapter
+  config: Record<string, unknown>
   /** 最近一次同步成功的时间（存在简历上，跨页面/跨设备都看得到） */
   syncedAt: string | null
-  /** 上面那个时间属于哪一份内容，形如 `<gistId>|<fileName>`；对不上就不能用来判断间隔 */
-  syncedFrom: string | null
+  /** 上面那个时间属于哪一份内容（适配器的 contentKey）；对不上就不能用来判断间隔 */
+  syncedKey: string | null
 }>()
 
 const emit = defineEmits<{
-  'update:config': [value: GistSource]
-  /** 同步成功：内容与来源交给调用方写进简历 */
-  'synced': [value: { markdown: string, gistId: string, fileName: string }]
+  'update:config': [value: Record<string, unknown>]
+  /** 同步成功：内容与标识交给调用方写进简历 */
+  'synced': [value: { markdown: string, contentKey: string, label?: string }]
 }>()
 
-function update(patch: Partial<GistSource>): void {
+function update(patch: Record<string, unknown>): void {
   emit('update:config', { ...props.config, ...patch })
 }
 
-function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+function str(value: unknown): string {
+  return typeof value === 'string' ? value : ''
 }
 
 // ---------------------------------------------------------------------------
@@ -53,21 +53,15 @@ function errorText(error: unknown): string {
 
 /** 输入框里的文字：既能是链接，也能是裸 ID */
 const input = ref('')
-/** 已经成功取到的文件列表，用来提供「换一个文件」 */
-const files = ref<string[]>([])
-
-/** 可选 token 的双向绑定（写回配置，交给父组件的 v-model:config） */
-const token = computed({
-  get: () => props.config.token,
-  set: value => update({ token: value }),
-})
+/** 输入无法识别时的就地提示（不动配置） */
+const inputError = ref('')
 
 /**
  * 输入框里显示的应该是规范化后的 ID（用户可能粘的是链接）。
  *
  * 只在 gistId 变化时同步输入框，用户正在打字时不动它。
  */
-watch(() => props.config.gistId, (gistId) => {
+watch(() => str(props.config.gistId), (gistId) => {
   if (parseGistId(input.value) !== gistId)
     input.value = gistId
 }, { immediate: true })
@@ -81,19 +75,23 @@ watch(() => props.config.gistId, (gistId) => {
 function commitInput(): void {
   const id = parseGistId(input.value)
 
-  if (id === props.config.gistId) {
-    input.value = props.config.gistId
+  if (id === str(props.config.gistId)) {
+    input.value = str(props.config.gistId)
+    inputError.value = ''
     return
   }
 
   if (id) {
+    inputError.value = ''
     // 换 Gist：清掉文件名（让它按新 Gist 重新自动挑），也清掉旧的文件列表
-    files.value = []
     update({ gistId: id, fileName: '' })
     return
   }
 
-  input.value = props.config.gistId
+  input.value = str(props.config.gistId)
+  inputError.value = input.value.trim()
+    ? '认不出这是 Gist 链接或 ID，已保留原来的值'
+    : ''
 }
 
 function onKeydown(event: KeyboardEvent): void {
@@ -104,70 +102,43 @@ function onKeydown(event: KeyboardEvent): void {
 }
 
 // ---------------------------------------------------------------------------
-// 同步
+// 同步（编排在 composable 里）
 // ---------------------------------------------------------------------------
 
-const syncStatus = ref<'idle' | 'syncing' | 'ok' | 'fail' | 'skipped'>('idle')
-const syncError = ref('')
-const syncMessage = ref('')
+const { status, error, message, items, sync } = useResumeSourceSync({
+  adapter: props.adapter,
+  config: () => props.config,
+  syncedAt: () => props.syncedAt,
+  syncedKey: () => props.syncedKey,
+  onSynced: handleSynced,
+})
 
-/** 本页面会话里已经同步过的「Gist + 文件」组合 */
-const syncedKeys = new Set<string>()
+/**
+ * 同步成功：把结果交给父组件写进简历，并把「实际取到的 gistId / 文件名」
+ * 回写进配置 —— 下次（换设备也一样）不必再猜自动挑的是哪个文件。
+ *
+ * ⚠ 回写会改变配置，因此必须避免把自己再点着：composable 已经把这次的
+ * contentKey 记进「本会话已同步」，所以配置变化触发的那次自动同步会直接返回，
+ * 不会形成「同步 → 写回 → 同步」的回环。
+ */
+function handleSynced(content: ResumeContent): void {
+  emit('synced', {
+    markdown: content.markdown,
+    contentKey: content.contentKey,
+    label: content.label,
+  })
 
-/** 最近一次同步成功的「Gist + 文件」与时间，供自动同步的间隔判断使用 */
-let lastSyncKey = ''
-let lastSyncAt = 0
+  // 规范化：用户粘的是链接时，把收敛后的 ID 也落盘
+  const gistId = parseGistId(str(props.config.gistId))
+  const patch: Record<string, unknown> = {}
+  if (gistId && gistId !== props.config.gistId)
+    patch.gistId = gistId
+  // 自动挑文件时用户没指定过文件名，把它记下来
+  if (content.label && content.label !== props.config.fileName)
+    patch.fileName = content.label
 
-/** 一份内容的标识：同一个 Gist 的同一个文件才算同一份 */
-function sourceKey(gistId: string, fileName: string): string {
-  return `${gistId}|${fileName}`
-}
-
-async function sync(source: GistSource = props.config): Promise<void> {
-  const gistId = parseGistId(source.gistId)
-  if (!gistId) {
-    syncStatus.value = 'fail'
-    syncError.value = '请先填写 Gist 链接或 ID'
-    return
-  }
-
-  syncStatus.value = 'syncing'
-  syncError.value = ''
-
-  try {
-    const res = await callBackground<
-      | { ok: true, gistId: string, fileName: string, markdown: string, files: string[] }
-      | { ok: false, error: string }
-    >('gist-fetch', { gistId, fileName: source.fileName, token: source.token.trim() })
-
-    if (!res.ok)
-      throw new Error(res.error)
-
-    emit('synced', { markdown: res.markdown, gistId: res.gistId, fileName: res.fileName })
-    files.value = res.files
-    syncMessage.value = `已同步 ${res.markdown.length} 字 · 文件 ${res.fileName}`
-    syncStatus.value = 'ok'
-    // 记下这次取的是哪份内容、什么时候取的，供自动同步的间隔判断使用
-    lastSyncKey = sourceKey(res.gistId, res.fileName)
-    lastSyncAt = Date.now()
-
-    // 把这次实际用的 Gist / 文件记下来：下次（换设备也一样）不必再猜。
-    // 但要先把规范化后的组合标成「已同步」，否则 watch 会把这次回写当成新变化再来一遍。
-    const patch: Partial<GistSource> = {}
-    if (props.config.gistId !== res.gistId)
-      patch.gistId = res.gistId
-    if (props.config.fileName !== res.fileName)
-      patch.fileName = res.fileName
-
-    if (Object.keys(patch).length > 0) {
-      syncedKeys.add(sourceKey(res.gistId, res.fileName))
-      update(patch)
-    }
-  }
-  catch (error) {
-    syncStatus.value = 'fail'
-    syncError.value = errorText(error)
-  }
+  if (Object.keys(patch).length > 0)
+    update(patch)
 }
 
 /** 换文件：写进配置即可，watch 会重新同步 */
@@ -175,81 +146,17 @@ function onPickFile(event: Event): void {
   update({ fileName: (event.target as HTMLSelectElement).value })
 }
 
-/**
- * 配置齐了就自动同步一次。
- *
- * 写 `immediate`：设置页每次打开、以及刚填完 ID / 换了文件时都会走到这里。
- * 存储还没读出来时 gistId 是空的，会被 parseGistId 挡掉（不报错、不改状态），
- * 等 useStoredValue 把值填进来，watch 会再触发一次。
- *
- * 防抖是必须的：换文件会连着改 fileName，用户也可能来回改输入框，
- * 不值得每个中间态都发一次请求。
- */
-const AUTO_SYNC_DEBOUNCE_MS = 400
-
-/**
- * 自动同步的最小间隔。
- *
- * 每次打开设置页都会走到这里，但**同一份内容**没必要反复取：简历一天改一两次，
- * 而 GitHub 对匿名请求限每小时 60 次 —— 反复开关设置页就会白白烧额度。
- * 所以同一个「Gist + 文件」在 10 分钟内只自动取一次（手动点「同步简历」不受限制）。
- * 换了 Gist 或换了文件，key 就变了，属于「另一份内容」，立刻取。
- */
-const AUTO_SYNC_MIN_INTERVAL_MS = 10 * 60 * 1000
-
-let autoSyncTimer: ReturnType<typeof setTimeout> | null = null
-
-function runAutoSync(): void {
-  autoSyncTimer = null
-
-  const gistId = parseGistId(props.config.gistId)
-  if (!gistId)
-    return
-
-  const key = sourceKey(gistId, props.config.fileName)
-  if (syncedKeys.has(key))
-    return
-
-  // 用存下来的时间播种，但**只在它确实属于当前这份内容时**才算数：
-  // 换了 Gist 之后 syncedFrom 是旧的，那就该立刻去取新的。
-  if (!lastSyncKey && props.syncedFrom === key) {
-    const stored = Date.parse(props.syncedAt ?? '')
-    if (Number.isFinite(stored)) {
-      lastSyncKey = key
-      lastSyncAt = stored
-    }
-  }
-
-  if (key === lastSyncKey && Date.now() - lastSyncAt < AUTO_SYNC_MIN_INTERVAL_MS) {
-    syncStatus.value = 'skipped'
-    return
-  }
-
-  syncedKeys.add(key)
-  void sync()
-}
-
-watch(
-  () => [props.config.gistId, props.config.fileName] as const,
-  () => {
-    if (autoSyncTimer)
-      clearTimeout(autoSyncTimer)
-    autoSyncTimer = setTimeout(runAutoSync, AUTO_SYNC_DEBOUNCE_MS)
-  },
-  { immediate: true },
-)
-
-onBeforeUnmount(() => {
-  if (autoSyncTimer)
-    clearTimeout(autoSyncTimer)
-})
-
 // ---------------------------------------------------------------------------
 // 展示辅助
 // ---------------------------------------------------------------------------
 
 /** 展示用：当前生效的文件名（同步成功后会回写成实际取到的那个） */
-const activeFileName = computed(() => props.config.fileName)
+const activeFileName = computed(() => str(props.config.fileName))
+
+const token = computed({
+  get: () => str(props.config.token),
+  set: value => update({ token: value }),
+})
 
 function formatDateTime(iso: string): string {
   const date = new Date(iso)
@@ -276,6 +183,9 @@ function formatDateTime(iso: string): string {
       <span class="mt-1 block text-xs text-amber-700">
         ⚠ Secret Gist 只是不被列出，拿到链接的人都能读，请妥善保管。
       </span>
+      <span v-if="inputError" class="mt-1 block text-xs text-red-600">
+        {{ inputError }}
+      </span>
     </label>
 
     <label class="block">
@@ -299,14 +209,14 @@ function formatDateTime(iso: string): string {
       </span>
     </label>
 
-    <label v-if="files.length > 1" class="block">
+    <label v-if="items.length > 1" class="block">
       <span class="mb-1 block text-sm text-gray-600">同步哪个文件</span>
       <select
         class="oh-input"
         :value="activeFileName"
         @change="onPickFile"
       >
-        <option v-for="name in files" :key="name" :value="name">
+        <option v-for="name in items" :key="name" :value="name">
           {{ name }}
         </option>
       </select>
@@ -319,10 +229,10 @@ function formatDateTime(iso: string): string {
       <button
         type="button"
         class="oh-btn-primary"
-        :disabled="syncStatus === 'syncing'"
+        :disabled="status === 'syncing'"
         @click="sync()"
       >
-        {{ syncStatus === 'syncing' ? '同步中…' : '同步简历' }}
+        {{ status === 'syncing' ? '同步中…' : '同步简历' }}
       </button>
       <span v-if="syncedAt" class="text-xs text-gray-400">
         上次同步：{{ formatDateTime(syncedAt) }}
@@ -330,20 +240,20 @@ function formatDateTime(iso: string): string {
     </div>
 
     <p
-      v-if="syncStatus === 'ok'"
+      v-if="status === 'ok'"
       class="flex items-start gap-1.5 rounded border border-teal-200 bg-teal-50 p-2 text-xs text-teal-800"
     >
       <span class="i-tabler-circle-check mt-[1px] shrink-0 text-sm" />
-      <span class="min-w-0 break-all">{{ syncMessage }}</span>
+      <span class="min-w-0 break-all">{{ message }}</span>
     </p>
     <p
-      v-else-if="syncStatus === 'fail'"
+      v-else-if="status === 'fail'"
       class="flex items-start gap-1.5 rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700"
     >
       <span class="i-tabler-alert-triangle mt-[1px] shrink-0 text-sm" />
-      <span class="min-w-0 break-all">同步失败：{{ syncError }}</span>
+      <span class="min-w-0 break-all">同步失败：{{ error }}</span>
     </p>
-    <p v-else-if="syncStatus === 'skipped'" class="text-xs text-gray-400">
+    <p v-else-if="status === 'skipped'" class="text-xs text-gray-400">
       10 分钟内已同步过，跳过自动刷新；要立刻取最新内容就点「同步简历」。
     </p>
   </div>
