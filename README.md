@@ -126,6 +126,10 @@ A few problems in this project had non-obvious answers, and they shape the archi
 
 The `/wapi/` endpoints authenticate with the browser session cookie, and a Manifest V3 service worker's requests do not carry page cookies — so those calls can only be made from the page's own context. The extension therefore hooks `fetch` and `XMLHttpRequest` from a `world: "MAIN"` content script and passively captures responses, adding zero extra requests. It installs the hook at `document_start` and caches the most recent detail response, which an isolated-world content script then picks up at `document_idle`; without that handshake, opening a job by direct link would miss the first-screen request entirely.
 
+### Two messaging channels, split by tab identity
+
+The side panel and the options page are **extension pages**: they have no tab id. `webext-bridge` routes on the background side through a single "endpoint name → port" slot, and the only context name available to them is `options` — so both pages register into the same slot. Whichever connects last evicts the other, which means a reply can be delivered to the wrong page (the caller then waits forever); worse, when one of the pages closes, the background deletes the shared slot while the other page's port is still alive, and that page's next message dies inside the library on `connMap.get(name).fingerprint`. These two surfaces therefore talk to the background over native `runtime.sendMessage` (see `src/logic/messaging.ts`), where every request is paired with its own response and no slot is shared. The content-script channel does have a tab id, so it keeps using `webext-bridge`, which routes its ports as `content-script@<tabId>`.
+
 ### Why salary has to come from the API
 
 BOSS renders salary figures with a custom font, so the DOM's `textContent` returns private-use-area characters (U+E000–U+F8FF) rather than digits. Salary is therefore taken from the API's `salaryDesc` field, with the DOM used only as a last-resort fallback for the JD itself.

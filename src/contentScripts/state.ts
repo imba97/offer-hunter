@@ -47,13 +47,14 @@ interface InjectedMessage {
 }
 
 /**
- * 通知扩展页面（侧边栏）岗位已变化。
+ * 通知后台「岗位已变化」，由后台广播给各扩展页面（侧边栏每个窗口一个）。
  *
- * 之前侧边栏只能每 2 秒轮询一次；有了这条推送，轮询降为兜底。
+ * 以前是直接发给 'options' 端点，但那是后台里侧边栏与设置页共用的槽位：
+ * 只会送到其中一个页面，另一个窗口的侧边栏永远收不到推送。
  * 侧边栏没打开时这条消息会失败 —— 那是正常情况，静默忽略。
  */
 function notifyJobChanged(job: JobView | null): void {
-  sendMessage('job-changed', { job }, 'options').catch(() => {})
+  sendMessage('job-changed', { job }, 'background').catch(() => {})
 }
 
 /** 请求注入脚本回传一次已捕获接口的快照 */

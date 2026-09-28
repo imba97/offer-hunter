@@ -1,7 +1,7 @@
 import type { DiagnosticResult, JobRecord, JobView } from '~/logic/types'
 import { reactive } from 'vue'
-import { onMessage, sendMessage } from 'webext-bridge/options'
 import { isBossPageUrl } from '~/logic/boss/selectors'
+import { callBackground, onPageBroadcast } from '~/logic/messaging'
 
 /**
  * 侧边栏的共享状态。
@@ -128,14 +128,13 @@ export function listenForTabChanges(onChange: () => void): () => void {
 }
 
 /**
- * 订阅内容脚本推来的「岗位已变化」。
+ * 订阅内容脚本推来的「岗位已变化」（内容脚本 → 后台 → 广播到各扩展页面）。
  *
  * 返回注销函数：侧边栏页面可能被反复打开，监听器要有明确的归属。
  */
 export function listenForJobChanges(onChange: (job: JobView | null) => void): () => void {
-  return onMessage('job-changed', ({ data }) => {
-    onChange(data.job ?? null)
-    return undefined
+  return onPageBroadcast<{ job: JobView | null }>('job-changed', ({ job }) => {
+    onChange(job ?? null)
   })
 }
 
@@ -156,7 +155,7 @@ export async function refreshCurrentJob(force = false): Promise<void> {
   // 再取岗位。注意：即使 onBoss 为 false 也照常尝试，
   // 因为用户可能把侧边栏停在一边、在另一个 BOSS 标签页里操作。
   try {
-    const res = await sendMessage('relay-current-job', { force }, 'background')
+    const res = await callBackground<{ ok: boolean, job: JobView | null }>('relay-current-job', { force })
     // 通信失败（内容脚本还没装载、页面正在跳转）时保留上一次的岗位，别把面板闪成空状态；
     // 「页面上确实没有岗位」由 ok=true + job=null 明确表达。
     if (res?.ok)
@@ -170,7 +169,7 @@ export async function refreshCurrentJob(force = false): Promise<void> {
 /** 从后台同步账本 */
 export async function syncRecords(): Promise<void> {
   try {
-    const all = await sendMessage('get-records', {}, 'background')
+    const all = await callBackground<Record<string, JobRecord>>('get-records')
     if (all) {
       for (const key of Object.keys(records))
         delete records[key]

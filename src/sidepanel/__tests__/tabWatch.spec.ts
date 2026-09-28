@@ -19,12 +19,11 @@ vi.mock('webextension-polyfill', () => ({
       onUpdated: { addListener: vi.fn(), removeListener: vi.fn() },
     },
     windows: { getCurrent: vi.fn(() => Promise.resolve({ id: 1 })) },
+    runtime: {
+      sendMessage: vi.fn(() => Promise.resolve({ ok: true, job: null })),
+      onMessage: { addListener: vi.fn(), removeListener: vi.fn() },
+    },
   },
-}))
-
-vi.mock('webext-bridge/options', () => ({
-  sendMessage: vi.fn(() => Promise.resolve(null)),
-  onMessage: vi.fn(),
 }))
 
 interface ActivatedInfo {

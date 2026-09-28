@@ -73,7 +73,8 @@ describe('watchJdChanges', () => {
     await vi.advanceTimersByTimeAsync(150)
 
     expect(currentJob.value?.jdText).toBe('新 JD：负责服务端架构设计')
-    expect(sendMessage).toHaveBeenCalledWith('job-changed', expect.anything(), 'options')
+    // 推给后台，由后台广播到各扩展页面（侧边栏可能不止一个）
+    expect(sendMessage).toHaveBeenCalledWith('job-changed', expect.anything(), 'background')
   })
 
   it('dom 里读到的岗位名/公司名会带进兜底岗位', async () => {

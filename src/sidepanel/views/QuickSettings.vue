@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { AiSettings, MatchingSettings, Resume } from '~/logic/types'
 import { computed, ref } from 'vue'
-import { sendMessage } from 'webext-bridge/options'
+import { callBackground } from '~/logic/messaging'
 import { STORAGE_KEYS, useStoredValue } from '~/logic/storage'
 import {
   createDefaultAiSettings,
@@ -34,7 +34,7 @@ const testState = ref<{ status: 'idle' | 'testing' | 'ok' | 'fail', message: str
 async function runTest() {
   testState.value = { status: 'testing', message: '测试中…' }
   try {
-    const res = await sendMessage('ai-test', {}, 'background')
+    const res = await callBackground<{ ok: boolean, latencyMs?: number, model?: string, reply?: string, error?: string }>('ai-test')
     testState.value = res.ok
       ? {
           status: 'ok',

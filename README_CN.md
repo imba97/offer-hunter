@@ -126,6 +126,10 @@ pnpm build
 
 `/wapi/` 接口只认浏览器会话 Cookie，而 MV3 的 service worker 发起的请求不带页面 Cookie —— 所以这些调用只能在页面自身的上下文里发起。扩展因此用 `world: "MAIN"` 的内容脚本 hook 页面的 `fetch` 与 `XMLHttpRequest` 被动捕获响应，零额外请求。它在 `document_start` 就装好 hook 并缓存最近一次详情响应，隔离世界的内容脚本再到 `document_idle` 把它取走；没有这次交接，直链打开岗位页会漏掉首屏请求。
 
+### 扩展页面与内容脚本走两条消息通道
+
+侧边栏与设置页都是**扩展页面**，没有 tabId。而 `webext-bridge` 在后台是「端点名 → 端口」的单槽位路由，这两个页面能用的上下文名只有 `options`，于是它们注册进同一个槽位：后连上的把先连上的挤掉，发给其中一页的回复会落到另一页（那一侧只能一直转圈）；更糟的是其中一页关闭时，后台会把整个槽位删掉，而另一页的端口还活着 —— 它之后发出的消息会在库内部直接抛 `connMap.get(名字).fingerprint` 的错。因此这两个界面与后台之间一律用原生 `runtime.sendMessage`（见 `src/logic/messaging.ts`）：一问一答天然配对，不存在共享槽位。内容脚本那条链路有 tabId，继续用 `webext-bridge`（它按 `content-script@<tabId>` 路由端口）。
+
 ### 为什么薪资只能从接口读
 
 BOSS 用自定义字体渲染薪资数字，DOM 的 `textContent` 返回的是 Unicode 私用区字符（U+E000–U+F8FF）而非数字。因此薪资以接口的 `salaryDesc` 为准，DOM 只作为拿不到接口数据时的 JD 兜底。

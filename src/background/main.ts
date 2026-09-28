@@ -1,6 +1,7 @@
-import type { JobSummary, JobView } from '~/logic/types'
+import type { JobRecord, JobSummary, JobView, MatchResult } from '~/logic/types'
 import { onMessage, sendMessage } from 'webext-bridge/background'
 import { isBossPageUrl, JOBS_PAGE_URL } from '~/logic/boss/selectors'
+import { broadcastToPages, handleBackgroundRequests } from '~/logic/messaging'
 import {
   ensureStorageDefaults,
   readAiSettings,
@@ -21,6 +22,11 @@ import { generateGreeting, matchJob, testAiConnection } from '~/platform/ai/matc
  *  3. 账本读写
  *  4. **为侧边栏转发请求到内容脚本** —— 侧边栏没有页面访问权，
  *     而 /wapi/ 接口必须携带页面 Cookie，只能由内容脚本代发
+ *
+ * 两条消息通道，按「有没有 tabId」分工，别混用：
+ *  · 扩展页面（侧边栏 / 设置页）→ 后台：原生 runtime.sendMessage，
+ *    见 logic/messaging.ts（用 webext-bridge 会因端点名撞车而误路由甚至报错）
+ *  · 后台 ↔ 内容脚本：webext-bridge，它按 tabId 路由端口，正是这里需要的
  *
  * 不做的事：不代点发送按钮，不碰登录凭据，不逆向签名。
  */
@@ -125,7 +131,7 @@ async function relayToContent<T>(
   }
 }
 
-onMessage('relay-current-job', async ({ data }) => {
+async function onRelayCurrentJob(data: { force?: boolean }) {
   const res = await relayToContent<{ job: JobView | null, url: string }>(
     'request-current-job',
     { force: Boolean(data?.force) },
@@ -133,13 +139,23 @@ onMessage('relay-current-job', async ({ data }) => {
   if (!res.ok)
     return { ok: false as const, reason: res.reason }
   return { ok: true as const, job: res.value?.job ?? null }
-})
+}
 
-onMessage('relay-diagnostic', async () => {
+async function onRelayDiagnostic() {
   const res = await relayToContent<unknown>('run-diagnostic', {})
   if (!res.ok)
     return { ok: false as const, reason: res.reason }
   return { ok: true as const, result: res.value as never }
+}
+
+/**
+ * 内容脚本推来「岗位已变化」，转成广播发给所有扩展页面。
+ *
+ * 内容脚本那一段仍走 webext-bridge（按 tabId 路由，可靠）；到这里之后改用广播：
+ * 侧边栏每个窗口一个，广播不需要知道谁是谁，也不会因为某个页面关闭而丢订阅。
+ */
+onMessage('job-changed', ({ data }) => {
+  broadcastToPages('job-changed', { job: (data as { job?: JobView | null } | undefined)?.job ?? null })
 })
 
 // ---------------------------------------------------------------------------
@@ -160,20 +176,18 @@ async function onAiTest() {
   }
 }
 
-onMessage('ai-test', onAiTest)
-
-onMessage('ai-match', async ({ data }) => {
+async function onAiMatch(data: { job: JobSummary, jdText: string }) {
   try {
     const [settings, resume] = await Promise.all([readAiSettings(), readResume()])
-    const result = await matchJob(settings, resume, data.job as JobSummary, data.jdText)
+    const result = await matchJob(settings, resume, data.job, data.jdText)
     return { ok: true as const, data: result }
   }
   catch (error) {
     return { ok: false as const, error: errorText(error) }
   }
-})
+}
 
-onMessage('ai-greeting', async ({ data }) => {
+async function onAiGreeting(data: { job: JobSummary, jdText: string, match?: MatchResult | null }) {
   try {
     const [settings, resume, matching] = await Promise.all([
       readAiSettings(),
@@ -183,7 +197,7 @@ onMessage('ai-greeting', async ({ data }) => {
     const result = await generateGreeting(
       settings,
       resume,
-      data.job as JobSummary,
+      data.job,
       data.jdText,
       // 带上匹配结论（若已分析过），让招呼语更贴合
       data.match ?? null,
@@ -195,17 +209,37 @@ onMessage('ai-greeting', async ({ data }) => {
   catch (error) {
     return { ok: false as const, error: errorText(error) }
   }
-})
+}
 
 // ---------------------------------------------------------------------------
 // 账本
 // ---------------------------------------------------------------------------
 
-onMessage('get-records', async () => {
+async function onGetRecords() {
   return await readRecords()
-})
+}
 
-onMessage('upsert-record', async ({ data }) => {
+async function onUpsertRecord(data: JobRecord) {
   await upsertRecord(data)
   return { ok: true }
+}
+
+// ---------------------------------------------------------------------------
+// 扩展页面 → 后台 的消息注册
+// ---------------------------------------------------------------------------
+
+/**
+ * 侧边栏与设置页都走这条通道（原生 runtime.sendMessage，一问一答）。
+ *
+ * ⚠ 这张表必须在 service worker 顶层同步注册：MV3 唤醒 SW 的那条消息，
+ * 只有「启动期间就注册好的监听器」能收到。
+ */
+handleBackgroundRequests({
+  'ai-test': () => onAiTest(),
+  'ai-match': data => onAiMatch(data),
+  'ai-greeting': data => onAiGreeting(data),
+  'get-records': () => onGetRecords(),
+  'upsert-record': data => onUpsertRecord(data),
+  'relay-current-job': data => onRelayCurrentJob(data),
+  'relay-diagnostic': () => onRelayDiagnostic(),
 })

@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import type { JobRecord, JobView, MatchingSettings, MatchResult } from '~/logic/types'
+import type { DiagnosticResult, JobRecord, JobView, MatchingSettings, MatchResult } from '~/logic/types'
+import type { GreetingResult } from '~/platform/ai/matching'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { sendMessage } from 'webext-bridge/options'
 import { JOBS_PAGE_URL } from '~/logic/boss/selectors'
+import { callBackground } from '~/logic/messaging'
 import { STORAGE_KEYS, useStoredValue } from '~/logic/storage'
 import { createDefaultMatchingSettings } from '~/logic/types'
 import {
@@ -166,7 +167,7 @@ async function persist(patch: Partial<JobRecord>) {
   }
   records[job.securityId] = next
   try {
-    await sendMessage('upsert-record', next, 'background')
+    await callBackground('upsert-record', next)
   }
   catch (error) {
     console.warn('[offer-hunter] 写入账本失败', error)
@@ -186,7 +187,10 @@ async function runMatch() {
   setNotice(`正在分析「${job.jobName}」…`)
 
   try {
-    const res = await sendMessage('ai-match', { job, jdText: job.jdText }, 'background')
+    const res = await callBackground<{ ok: boolean, data?: MatchResult, error?: string }>(
+      'ai-match',
+      { job, jdText: job.jdText },
+    )
     if (!res.ok) {
       await persist({ status: 'failed', error: res.error })
       setNotice(res.error, 'error')
@@ -223,10 +227,9 @@ async function runGreeting() {
   setNotice('正在生成招呼语…')
 
   try {
-    const res = await sendMessage(
+    const res = await callBackground<{ ok: boolean, data?: GreetingResult, error?: string }>(
       'ai-greeting',
       { job, jdText: job.jdText, match: record.value?.match ?? null },
-      'background',
     )
     if (!res.ok) {
       setNotice(res.error, 'error')
@@ -255,7 +258,9 @@ function copyGreeting() {
 async function runDiagnostic() {
   diagnostic.running = true
   try {
-    const res = await sendMessage('relay-diagnostic', {}, 'background')
+    const res = await callBackground<{ ok: boolean, result?: DiagnosticResult, reason?: string }>(
+      'relay-diagnostic',
+    )
     if (res?.ok) {
       diagnostic.result = res.result ?? null
       setNotice('诊断完成', 'success')

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import type { AiPlatformName, AiSettings, MatchingSettings, Resume } from '~/logic/types'
 import { computed, defineAsyncComponent, defineComponent, h, ref } from 'vue'
-import { sendMessage } from 'webext-bridge/options'
 import logo from '~/assets/logo.png'
+import { callBackground } from '~/logic/messaging'
 import { resetAllStorage, STORAGE_KEYS, useStoredValue } from '~/logic/storage'
 import {
   createDefaultAiSettings,
@@ -74,7 +74,14 @@ const test = ref<TestState>({ status: 'idle' })
 async function runTest() {
   test.value = { status: 'testing' }
   try {
-    const res = await sendMessage('ai-test', {}, 'background')
+    const res = await callBackground<{
+      ok: boolean
+      provider?: string
+      model?: string
+      reply?: string
+      latencyMs?: number
+      error?: string
+    }>('ai-test')
     if (res.ok) {
       test.value = {
         status: 'ok',
