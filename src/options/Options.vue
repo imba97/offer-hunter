@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import type { AiPlatformName, AiSettings, MatchingSettings, Resume } from '~/logic/types'
+import type { AiPlatformName, AiSettings, MatchingSettings, Resume, ResumeSourceId } from '~/logic/types'
 import { computed, defineAsyncComponent, defineComponent, h, ref } from 'vue'
 import logo from '~/assets/logo.png'
+import GistPicker from '~/components/GistPicker.vue'
 import ScrollArea from '~/components/ScrollArea.vue'
 import { callBackground } from '~/logic/messaging'
 import { resetAllStorage, STORAGE_KEYS, useStoredValue } from '~/logic/storage'
@@ -9,6 +10,7 @@ import {
   createDefaultAiSettings,
   createDefaultMatchingSettings,
   createEmptyResume,
+  normalizeResumeSource,
 } from '~/logic/types'
 import { AI_PLATFORM_OPTIONS } from '~/platform/ai/platforms'
 
@@ -16,7 +18,8 @@ import { AI_PLATFORM_OPTIONS } from '~/platform/ai/platforms'
  * 设置页：简历维护 + 打招呼规则 + AI 平台配置。
  *
  * 独立标签页打开，空间充足（侧边栏太窄，放不下编辑器与完整表单）。
- * PDF / GitHub Gist 简历导入尚未实现（见 README 的「当前进度」）。
+ * 简历有两种来源：直接在编辑器里写（手动输入），或从一个 GitHub Gist 同步
+ * （见 components/GistPicker.vue）。PDF 导入仍未实现（见 README 的路线图）。
  *
  * 存储统一走 logic/storage 的 useStoredValue，保证与 service worker 侧
  * 读写格式一致（模板自带的 composable 会把值序列化成字符串，导致后台读不到）。
@@ -114,6 +117,33 @@ function touchResume() {
 }
 
 // ---------------------------------------------------------------------------
+// 简历来源
+// ---------------------------------------------------------------------------
+
+/**
+ * 当前来源。
+ *
+ * 用可写计算属性而不是直接绑 `resume.sourceId`：存储里可能是 null（早于来源概念的
+ * 旧数据）或已废弃的值，读的时候要收敛成「手动输入」，写的时候才落成明确的值。
+ */
+const resumeMode = computed<ResumeSourceId>({
+  get: () => normalizeResumeSource(resume.value.sourceId),
+  set: value => (resume.value.sourceId = value),
+})
+
+/**
+ * Gist 同步完成：只写「内容与时间」，配置（token / gistId / 文件名）由
+ * GistPicker 自己通过 v-model:config 写回 —— 两边各管一半，不会互相覆盖。
+ */
+function onGistSynced(payload: { markdown: string }) {
+  const now = new Date().toISOString()
+  resume.value.sourceId = 'gist'
+  resume.value.markdown = payload.markdown
+  resume.value.syncedAt = now
+  resume.value.updatedAt = now
+}
+
+// ---------------------------------------------------------------------------
 // 数据管理
 // ---------------------------------------------------------------------------
 
@@ -192,9 +222,27 @@ async function clearAllData() {
           若简历含手机号、身份证号等敏感信息，建议先脱敏。
         </div>
 
+        <label class="block">
+          <span class="mb-1 block text-sm text-gray-600">简历来源</span>
+          <select v-model="resumeMode" class="oh-input">
+            <option value="paste">手动编辑（Markdown）</option>
+            <option value="gist">GitHub Gist 同步</option>
+          </select>
+          <span class="mt-1 block text-xs text-gray-400">
+            两种来源最终都落到本机的同一份 Markdown 上，匹配分析只看这份内容。
+          </span>
+        </label>
+
+        <GistPicker
+          v-if="resumeMode === 'gist'"
+          v-model:config="resume.gist"
+          :synced-at="resume.syncedAt"
+          @synced="onGistSynced"
+        />
+
         <div>
           <div class="mb-1 flex items-center justify-between text-sm text-gray-600">
-            <span>简历全文（Markdown）</span>
+            <span>{{ resumeMode === 'gist' ? '简历预览（只读）' : '简历全文（Markdown）' }}</span>
             <span class="text-xs text-gray-400">
               {{ resume.markdown.length }} 字
               <template v-if="resume.updatedAt">
@@ -204,11 +252,16 @@ async function clearAllData() {
           </div>
           <MarkdownEditor
             v-model="resume.markdown"
+            :readonly="resumeMode === 'gist'"
             @submit="touchResume"
           />
         </div>
 
-        <p class="text-xs text-gray-400">
+        <p v-if="resumeMode === 'gist'" class="text-xs text-gray-400">
+          Gist 模式下这里只读：内容以 Gist 为准，本地改动会在下次同步时被覆盖。
+          想直接改内容，把来源切回「手动编辑」即可（切回来仍是你现在看到的这份）。
+        </p>
+        <p v-else class="text-xs text-gray-400">
           编辑器为 Monaco + Shiki 高亮（vitesse-dark 主题），支持 Markdown 语法着色与撤销栈。
           内容改动会自动保存；Cmd/Ctrl + Enter 可手动触发一次保存时间戳更新。
         </p>

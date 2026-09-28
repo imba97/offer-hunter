@@ -74,8 +74,19 @@ export function handleBackgroundRequests(handlers: Record<string, BackgroundRequ
       return undefined
 
     const handler = handlers[message.id]
-    if (!handler)
-      return Promise.reject(new Error(`后台没有注册消息：${message.id}`))
+    if (!handler) {
+      /*
+        出现这个错误只有一种现实解释：**页面比后台新**。
+
+        页面与后台是两个分开的构建产物，而且 MV3 的 service worker 不会跟着
+        页面刷新一起换新 —— 页面按 F5 会重新读盘，SW 却要「重载扩展」才会换。
+        症状因此很像 bug：界面上明明有某个按钮，点下去却说后台不认识它。
+        把这句话写在错误里，省得下次再去翻构建产物。
+      */
+      return Promise.reject(new Error(
+        `后台没有注册消息：${message.id} —— 后台代码可能还是旧的，请到浏览器扩展管理页重新加载一次本扩展`,
+      ))
+    }
 
     return Promise.resolve(handler(message.data))
   })

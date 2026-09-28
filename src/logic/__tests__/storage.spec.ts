@@ -1,7 +1,13 @@
 import type { JobRecord } from '../types'
 import { describe, expect, it, vi } from 'vitest'
 import { mergeDefaults, stripRemovedRecordFields } from '../storage'
-import { createDefaultAiSettings, createDefaultMatchingSettings, createEmptyResume } from '../types'
+import {
+  createDefaultAiSettings,
+  createDefaultMatchingSettings,
+  createEmptyGistSource,
+  createEmptyResume,
+  normalizeResumeSource,
+} from '../types'
 
 /**
  * webextension-polyfill 在 jsdom 里没有 chrome.* 可用，import 时就会抛错。
@@ -36,13 +42,32 @@ describe('mergeDefaults', () => {
   })
 
   it('丢掉默认值里已不存在的字段（旧数据不再被写回）', () => {
+    // 这条数据是「简历还只有 markdown / sourceId / updatedAt」那个版本的形状
     const merged = mergeDefaults(
       { markdown: '# 我', sourceId: null, updatedAt: null, basics: { city: '上海' } },
       createEmptyResume(),
     )
 
-    expect(merged).toEqual({ markdown: '# 我', sourceId: null, updatedAt: null })
+    // 新增的 Gist 配置要被补成默认值，而不是留成 undefined
+    expect(merged).toEqual({ ...createEmptyResume(), markdown: '# 我' })
+    expect(merged.gist).toEqual(createEmptyGistSource())
     expect('basics' in merged).toBe(false)
+  })
+
+  it('简历里已有的 Gist 配置不被默认值覆盖（token 是可选字段，留着）', () => {
+    const merged = mergeDefaults(
+      {
+        markdown: '# 我',
+        gist: { token: 'ghp_x', gistId: 'aa5a315d61ae9438b18d', fileName: 'resume.md' },
+      },
+      createEmptyResume(),
+    )
+
+    expect(merged.gist).toEqual({
+      token: 'ghp_x',
+      gistId: 'aa5a315d61ae9438b18d',
+      fileName: 'resume.md',
+    })
   })
 
   it('把早期被 JSON 字符串化的数据还原成对象', () => {
@@ -102,5 +127,24 @@ describe('stripRemovedRecordFields', () => {
     const records = { a: { securityId: 'a', match: null } } as unknown as Record<string, JobRecord>
 
     expect(stripRemovedRecordFields(records)).toBe(false)
+  })
+})
+
+/**
+ * 简历来源的收敛。
+ *
+ * 存储里出现 null 或已废弃的值都不该让界面处于「两个选项都没选中」的状态，
+ * 它们原本的行为就是手动输入。
+ */
+describe('normalizeResumeSource', () => {
+  it('保留 gist', () => {
+    expect(normalizeResumeSource('gist')).toBe('gist')
+  })
+
+  it('paste / null / 已废弃的 pdf / 乱七八糟的值都按手动输入处理', () => {
+    expect(normalizeResumeSource('paste')).toBe('paste')
+    expect(normalizeResumeSource(null)).toBe('paste')
+    expect(normalizeResumeSource('pdf')).toBe('paste')
+    expect(normalizeResumeSource(undefined)).toBe('paste')
   })
 })

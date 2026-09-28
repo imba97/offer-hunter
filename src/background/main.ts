@@ -11,6 +11,7 @@ import {
   upsertRecord,
 } from '~/logic/storage'
 import { generateGreeting, matchJob, testAiConnection } from '~/platform/ai/matching'
+import { fetchGistContent } from '~/platform/gist/gist'
 
 /**
  * 后台 service worker。
@@ -22,6 +23,7 @@ import { generateGreeting, matchJob, testAiConnection } from '~/platform/ai/matc
  *  3. 账本读写
  *  4. **为侧边栏转发请求到内容脚本** —— 侧边栏没有页面访问权，
  *     而 /wapi/ 接口必须携带页面 Cookie，只能由内容脚本代发
+ *  5. GitHub Gist 拉取 —— 简历可以放在 Gist 里（见 platform/gist/gist.ts，无需凭据）
  *
  * 两条消息通道，按「有没有 tabId」分工，别混用：
  *  · 扩展页面（侧边栏 / 设置页）→ 后台：原生 runtime.sendMessage，
@@ -212,6 +214,33 @@ async function onAiGreeting(data: { job: JobSummary, jdText: string, match?: Mat
 }
 
 // ---------------------------------------------------------------------------
+// GitHub Gist（简历来源）
+// ---------------------------------------------------------------------------
+
+/**
+ * Gist 请求为什么也走后台：
+ *
+ * 与 AI 调用同一条规矩 —— 出网请求只经过后台，扩展页面侧只发消息。
+ * 读 Gist 本身不需要凭据；token 是可选的，只用来把接口额度从匿名 60 次/小时
+ * 提升到 5000 次/小时（见 platform/gist/gist.ts）。
+ */
+async function onGistFetch(data: { gistId?: string, fileName?: string, token?: string }) {
+  try {
+    return {
+      ok: true as const,
+      ...await fetchGistContent({
+        gistId: data?.gistId ?? '',
+        fileName: data?.fileName ?? '',
+        token: data?.token ?? '',
+      }),
+    }
+  }
+  catch (error) {
+    return { ok: false as const, error: errorText(error) }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 账本
 // ---------------------------------------------------------------------------
 
@@ -238,6 +267,7 @@ handleBackgroundRequests({
   'ai-test': () => onAiTest(),
   'ai-match': data => onAiMatch(data),
   'ai-greeting': data => onAiGreeting(data),
+  'gist-fetch': data => onGistFetch(data),
   'get-records': () => onGetRecords(),
   'upsert-record': data => onUpsertRecord(data),
   'relay-current-job': data => onRelayCurrentJob(data),

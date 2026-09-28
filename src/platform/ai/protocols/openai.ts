@@ -5,10 +5,10 @@ import type {
   PingResult,
   ResolvedConfig,
 } from '../types'
+import { fetchWithTimeout } from '~/platform/http'
 import {
   AI_PING_TIMEOUT_MS,
   AI_REQUEST_TIMEOUT_MS,
-  fetchWithTimeout,
   responseErrorDetail,
   stripTrailingSlash,
 } from './http'

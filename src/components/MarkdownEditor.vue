@@ -28,6 +28,13 @@ import { onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 
 const props = defineProps<{
   modelValue: string
+  /**
+   * 只读模式：内容由外部生成（例如从 Gist 同步下来的简历），本地不该改。
+   *
+   * 用 Monaco 自己的 `readOnly` 而不是不渲染编辑器：仍然要看得到高亮与缩略图，
+   * 只是不接受输入 —— 一个「能滚能选但打不了字」的预览。
+   */
+  readonly?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -75,6 +82,7 @@ async function initEditor(): Promise<void> {
     language: 'markdown',
     theme: 'vitesse-dark',
     automaticLayout: true,
+    readOnly: Boolean(props.readonly),
     /*
       缩略图开着：Markdown 常常几百行，有一张全局缩略图才好跳。
       代价是右侧约 100px 的宽度，设置页有 3xl 的余量，够用。
@@ -125,6 +133,11 @@ watch(() => props.modelValue, (value) => {
     }])
     editor.value.pushUndoStop()
   }
+})
+
+// 来源切换（手动输入 ↔ Gist 同步）时切换只读，不必重建编辑器
+watch(() => props.readonly, (readonly) => {
+  editor.value?.updateOptions({ readOnly: Boolean(readonly) })
 })
 
 onBeforeUnmount(() => {

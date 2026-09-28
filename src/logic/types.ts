@@ -33,7 +33,37 @@ export function createDefaultAiSettings(): AiSettings {
 // 简历
 // ---------------------------------------------------------------------------
 
-export type ResumeSourceId = 'paste' | 'pdf' | 'gist'
+/**
+ * 简历来源。
+ *
+ * 曾经还预留过 `'pdf'`，但 PDF 导入一直没做 —— 下拉框里摆一个点不动的选项，
+ * 只会让人以为「选了 PDF 就会导入」。等导入器真做出来再加回去。
+ */
+export type ResumeSourceId = 'paste' | 'gist'
+
+/**
+ * Gist 同步配置。
+ *
+ * 没有 token 也能用：**读某一个 Gist 不需要任何凭据**（secret Gist 是「不被列出」
+ * 而不是「要授权」，谁有链接谁能看）。token 是**可选**的，只为一件事 —— 把 GitHub
+ * 接口的额度从匿名的每小时 60 次提升到每小时 5000 次。它不参与 AI 请求。
+ */
+export interface GistSource {
+  /** 可选的 GitHub Personal access token，只为提额度；留空即匿名请求 */
+  token: string
+  /** Gist ID；粘贴 gist.github.com 链接时由 parseGistId 收敛成 ID */
+  gistId: string
+  /** 要同步的文件名；留空表示按文件名自动挑一个（见 pickResumeFile） */
+  fileName: string
+}
+
+export function createEmptyGistSource(): GistSource {
+  return {
+    token: '',
+    gistId: '',
+    fileName: '',
+  }
+}
 
 /**
  * 简历。
@@ -43,11 +73,19 @@ export type ResumeSourceId = 'paste' | 'pdf' | 'gist'
  * 直接让 AI 读完整简历 + JD，且需要用户额外填一堆表单。
  *
  * 匹配所需的信息全部由 AI 从 markdown 里理解。
+ *
+ * 无论简历来自手动输入还是 Gist，最终都以 `markdown` 为准喂给 AI：
+ * 后台读简历时不需要知道它从哪来，也就不会出现「两种来源两套取数逻辑」。
  */
 export interface Resume {
   /** Markdown 全文，喂给 AI 的主体 */
   markdown: string
+  /** 当前生效的来源；null 是历史数据（当时还没有来源概念），按手动输入处理 */
   sourceId: ResumeSourceId | null
+  /** Gist 同步配置（来源为手动输入时保留但不使用） */
+  gist: GistSource
+  /** 最近一次从 Gist 成功同步的时间 */
+  syncedAt: string | null
   updatedAt: string | null
 }
 
@@ -55,8 +93,20 @@ export function createEmptyResume(): Resume {
   return {
     markdown: '',
     sourceId: null,
+    gist: createEmptyGistSource(),
+    syncedAt: null,
     updatedAt: null,
   }
+}
+
+/**
+ * 把存储里的来源收敛成当前支持的两种之一。
+ *
+ * 存储里可能是 null（早于来源概念的旧数据）、也可能残留已废弃的值（如 `'pdf'`），
+ * 这些一律按「手动输入」处理 —— 那正是它们原本的行为。
+ */
+export function normalizeResumeSource(value: unknown): ResumeSourceId {
+  return value === 'gist' ? 'gist' : 'paste'
 }
 
 // ---------------------------------------------------------------------------

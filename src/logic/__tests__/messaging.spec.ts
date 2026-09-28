@@ -61,9 +61,11 @@ describe('callBackground', () => {
     await expect(callBackground('get-records')).rejects.toThrow('后台没有响应')
   })
 
-  it('未注册的消息 id 会拒绝', async () => {
+  it('未注册的消息 id 会拒绝，并提示「后台可能还是旧的」', async () => {
     handleBackgroundRequests({})
     await expect(callBackground('nope')).rejects.toThrow('后台没有注册消息')
+    // 这个错几乎只出现在「页面已更新、后台没重载」时，提示必须能让人自己修好
+    await expect(callBackground('nope')).rejects.toThrow('重新加载一次本扩展')
   })
 
   it('两个页面各问各的，互不影响', async () => {
