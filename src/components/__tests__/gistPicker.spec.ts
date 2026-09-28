@@ -20,11 +20,20 @@ const GIST_ID = 'aa5a315d61ae9438b18d'
 /** 自动同步的防抖窗口（组件里的 AUTO_SYNC_DEBOUNCE_MS）+ 一点余量 */
 const DEBOUNCE_MS = 400
 
-function mountPicker(config: Partial<{ token: string, gistId: string, fileName: string }> = {}) {
+/** 一份内容的标识，与组件里 sourceKey 的约定一致 */
+function sourceKey(gistId: string, fileName = ''): string {
+  return `${gistId}|${fileName}`
+}
+
+function mountPicker(
+  config: Partial<{ token: string, gistId: string, fileName: string }> = {},
+  synced: { syncedAt?: string | null, syncedFrom?: string | null } = {},
+) {
   const wrapper = mount(GistPicker, {
     props: {
       config: { token: '', gistId: '', fileName: '', ...config },
-      syncedAt: null,
+      syncedAt: synced.syncedAt ?? null,
+      syncedFrom: synced.syncedFrom ?? null,
     },
   })
 
@@ -74,7 +83,9 @@ describe('gistPicker', () => {
       fileName: '',
       token: '',
     })
-    expect(wrapper.emitted('synced')?.[0]).toEqual([{ markdown: '# 我' }])
+    expect(wrapper.emitted('synced')?.[0]).toEqual([
+      { markdown: '# 我', gistId: GIST_ID, fileName: 'resume.md' },
+    ])
     expect(wrapper.text()).toContain('已同步 3 字 · 文件 resume.md')
   })
 
@@ -171,6 +182,102 @@ describe('gistPicker', () => {
     await tokenInput.setValue('ghp_pasted')
 
     expect(lastUpdate(wrapper)).toMatchObject({ token: 'ghp_pasted' })
+  })
+
+  it('10 分钟内已经同步过同一份内容时，不再自动重复取', async () => {
+    vi.setSystemTime(new Date('2026-03-01T12:00:00Z'))
+    const { wrapper } = mountPicker(
+      { gistId: GIST_ID },
+      {
+        syncedAt: new Date('2026-03-01T11:55:00Z').toISOString(), // 5 分钟前
+        syncedFrom: sourceKey(GIST_ID),
+      },
+    )
+
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS * 3)
+
+    expect(callBackground).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('10 分钟内已同步过')
+  })
+
+  it('超过 10 分钟后照常自动同步', async () => {
+    vi.mocked(callBackground).mockResolvedValue(okFetch())
+    vi.setSystemTime(new Date('2026-03-01T12:00:00Z'))
+
+    mountPicker(
+      { gistId: GIST_ID },
+      {
+        syncedAt: new Date('2026-03-01T11:49:00Z').toISOString(),
+        syncedFrom: sourceKey(GIST_ID),
+      },
+    )
+
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS * 3)
+
+    expect(callBackground).toHaveBeenCalledTimes(1)
+  })
+
+  it('换了 Gist 就不受间隔限制（旧时间不属于新内容）', async () => {
+    vi.mocked(callBackground).mockResolvedValue(okFetch())
+    vi.setSystemTime(new Date('2026-03-01T12:00:00Z'))
+
+    mountPicker(
+      { gistId: 'bb5a315d61ae9438b18d' },
+      {
+        syncedAt: new Date('2026-03-01T11:59:00Z').toISOString(), // 1 分钟前，但属于另一个 Gist
+        syncedFrom: sourceKey(GIST_ID),
+      },
+    )
+
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS * 3)
+
+    expect(callBackground).toHaveBeenCalledTimes(1)
+  })
+
+  it('没有来源记录时（旧数据）不拿旧时间去挡', async () => {
+    vi.mocked(callBackground).mockResolvedValue(okFetch())
+    vi.setSystemTime(new Date('2026-03-01T12:00:00Z'))
+
+    mountPicker(
+      { gistId: GIST_ID },
+      { syncedAt: new Date('2026-03-01T11:59:00Z').toISOString() },
+    )
+
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS * 3)
+
+    expect(callBackground).toHaveBeenCalledTimes(1)
+  })
+
+  it('手动点「同步简历」不受 10 分钟限制', async () => {
+    vi.mocked(callBackground).mockResolvedValue(okFetch())
+    vi.setSystemTime(new Date('2026-03-01T12:00:00Z'))
+
+    const { wrapper } = mountPicker(
+      { gistId: GIST_ID },
+      {
+        syncedAt: new Date('2026-03-01T11:59:00Z').toISOString(),
+        syncedFrom: sourceKey(GIST_ID),
+      },
+    )
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS * 3)
+    expect(callBackground).not.toHaveBeenCalled()
+
+    await wrapper.get('button').trigger('click')
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(callBackground).toHaveBeenCalledTimes(1)
+    expect(wrapper.text()).toContain('已同步 3 字')
+  })
+
+  it('同步成功时把来源一起交给调用方（间隔判断要靠它）', async () => {
+    vi.mocked(callBackground).mockResolvedValue(okFetch())
+
+    const { wrapper } = mountPicker({ gistId: GIST_ID })
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS)
+
+    expect(wrapper.emitted('synced')?.[0]).toEqual([
+      { markdown: '# 我', gistId: GIST_ID, fileName: 'resume.md' },
+    ])
   })
 
   it('同步失败时把后台的理由显示出来', async () => {

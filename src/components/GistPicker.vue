@@ -19,7 +19,8 @@ import { parseGistId } from '~/platform/gist/gist'
  *
  * 1. **列表由后台代取**（见 background/main.ts 的 onGistFetch）：扩展页面侧不发跨源请求。
  * 2. **配置一变化就自动同步**：改 ID、换文件、甚至只是切到这个标签页，内容都该是新的。
- *    用 syncedKeys 记住「已经同步过的组合」，否则「同步 → 回写文件名 → 再同步」会成回环。
+ *    用 syncedKeys 记住「已经同步过的组合」，否则「同步 → 回写文件名 → 再同步」会成回环；
+ *    另外同一个 Gist 在 10 分钟内只自动取一次，免得来回开关设置页白白烧 GitHub 额度。
  * 3. **输入框失焦（或回车）时才提交**，而不是边打边发请求 —— ID 是敲进去的，
  *    每敲一个字符就请求一次会连吃一串 404。
  */
@@ -28,12 +29,14 @@ const props = defineProps<{
   config: GistSource
   /** 最近一次同步成功的时间（存在简历上，跨页面/跨设备都看得到） */
   syncedAt: string | null
+  /** 上面那个时间属于哪一份内容，形如 `<gistId>|<fileName>`；对不上就不能用来判断间隔 */
+  syncedFrom: string | null
 }>()
 
 const emit = defineEmits<{
   'update:config': [value: GistSource]
-  /** 同步成功：内容交给调用方写进简历 */
-  'synced': [value: { markdown: string }]
+  /** 同步成功：内容与来源交给调用方写进简历 */
+  'synced': [value: { markdown: string, gistId: string, fileName: string }]
 }>()
 
 function update(patch: Partial<GistSource>): void {
@@ -104,12 +107,21 @@ function onKeydown(event: KeyboardEvent): void {
 // 同步
 // ---------------------------------------------------------------------------
 
-const syncStatus = ref<'idle' | 'syncing' | 'ok' | 'fail'>('idle')
+const syncStatus = ref<'idle' | 'syncing' | 'ok' | 'fail' | 'skipped'>('idle')
 const syncError = ref('')
 const syncMessage = ref('')
 
 /** 本页面会话里已经同步过的「Gist + 文件」组合 */
 const syncedKeys = new Set<string>()
+
+/** 最近一次同步成功的「Gist + 文件」与时间，供自动同步的间隔判断使用 */
+let lastSyncKey = ''
+let lastSyncAt = 0
+
+/** 一份内容的标识：同一个 Gist 的同一个文件才算同一份 */
+function sourceKey(gistId: string, fileName: string): string {
+  return `${gistId}|${fileName}`
+}
 
 async function sync(source: GistSource = props.config): Promise<void> {
   const gistId = parseGistId(source.gistId)
@@ -131,10 +143,13 @@ async function sync(source: GistSource = props.config): Promise<void> {
     if (!res.ok)
       throw new Error(res.error)
 
-    emit('synced', { markdown: res.markdown })
+    emit('synced', { markdown: res.markdown, gistId: res.gistId, fileName: res.fileName })
     files.value = res.files
     syncMessage.value = `已同步 ${res.markdown.length} 字 · 文件 ${res.fileName}`
     syncStatus.value = 'ok'
+    // 记下这次取的是哪份内容、什么时候取的，供自动同步的间隔判断使用
+    lastSyncKey = sourceKey(res.gistId, res.fileName)
+    lastSyncAt = Date.now()
 
     // 把这次实际用的 Gist / 文件记下来：下次（换设备也一样）不必再猜。
     // 但要先把规范化后的组合标成「已同步」，否则 watch 会把这次回写当成新变化再来一遍。
@@ -145,7 +160,7 @@ async function sync(source: GistSource = props.config): Promise<void> {
       patch.fileName = res.fileName
 
     if (Object.keys(patch).length > 0) {
-      syncedKeys.add(`${res.gistId}|${res.fileName}`)
+      syncedKeys.add(sourceKey(res.gistId, res.fileName))
       update(patch)
     }
   }
@@ -172,6 +187,16 @@ function onPickFile(event: Event): void {
  */
 const AUTO_SYNC_DEBOUNCE_MS = 400
 
+/**
+ * 自动同步的最小间隔。
+ *
+ * 每次打开设置页都会走到这里，但**同一份内容**没必要反复取：简历一天改一两次，
+ * 而 GitHub 对匿名请求限每小时 60 次 —— 反复开关设置页就会白白烧额度。
+ * 所以同一个「Gist + 文件」在 10 分钟内只自动取一次（手动点「同步简历」不受限制）。
+ * 换了 Gist 或换了文件，key 就变了，属于「另一份内容」，立刻取。
+ */
+const AUTO_SYNC_MIN_INTERVAL_MS = 10 * 60 * 1000
+
 let autoSyncTimer: ReturnType<typeof setTimeout> | null = null
 
 function runAutoSync(): void {
@@ -181,9 +206,24 @@ function runAutoSync(): void {
   if (!gistId)
     return
 
-  const key = `${gistId}|${props.config.fileName}`
+  const key = sourceKey(gistId, props.config.fileName)
   if (syncedKeys.has(key))
     return
+
+  // 用存下来的时间播种，但**只在它确实属于当前这份内容时**才算数：
+  // 换了 Gist 之后 syncedFrom 是旧的，那就该立刻去取新的。
+  if (!lastSyncKey && props.syncedFrom === key) {
+    const stored = Date.parse(props.syncedAt ?? '')
+    if (Number.isFinite(stored)) {
+      lastSyncKey = key
+      lastSyncAt = stored
+    }
+  }
+
+  if (key === lastSyncKey && Date.now() - lastSyncAt < AUTO_SYNC_MIN_INTERVAL_MS) {
+    syncStatus.value = 'skipped'
+    return
+  }
 
   syncedKeys.add(key)
   void sync()
@@ -253,7 +293,9 @@ function formatDateTime(iso: string): string {
       >
       <span class="mt-1 block text-xs text-gray-400">
         填不填都能同步；填上只为提高额度：匿名 60 次/小时 → 5000 次/小时。
-        ⚠ 与 API Key 一样明文存在本机。
+      </span>
+      <span class="mt-1 block text-xs text-amber-700">
+        ⚠ 明文存在本机。
       </span>
     </label>
 
@@ -300,6 +342,9 @@ function formatDateTime(iso: string): string {
     >
       <span class="i-tabler-alert-triangle mt-[1px] shrink-0 text-sm" />
       <span class="min-w-0 break-all">同步失败：{{ syncError }}</span>
+    </p>
+    <p v-else-if="syncStatus === 'skipped'" class="text-xs text-gray-400">
+      10 分钟内已同步过，跳过自动刷新；要立刻取最新内容就点「同步简历」。
     </p>
   </div>
 </template>

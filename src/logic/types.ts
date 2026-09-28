@@ -86,6 +86,13 @@ export interface Resume {
   gist: GistSource
   /** 最近一次从 Gist 成功同步的时间 */
   syncedAt: string | null
+  /**
+   * 最近一次同步的是哪一份内容，形如 `<gistId>|<fileName>`，与 syncedAt 同时写入。
+   *
+   * 存在的意义：只有知道那个时间属于哪一份内容，才能判断「现在这份是不是刚取过」——
+   * 否则换了 Gist 之后，新 Gist 会被旧 Gist 的同步时间挡住，看起来像坏掉了。
+   */
+  syncedFrom: string | null
   updatedAt: string | null
 }
 
@@ -95,6 +102,7 @@ export function createEmptyResume(): Resume {
     sourceId: null,
     gist: createEmptyGistSource(),
     syncedAt: null,
+    syncedFrom: null,
     updatedAt: null,
   }
 }

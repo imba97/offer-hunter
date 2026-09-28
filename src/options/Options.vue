@@ -138,14 +138,15 @@ const resumeMode = computed<ResumeSourceId>({
 })
 
 /**
- * Gist 同步完成：只写「内容与时间」，配置（token / gistId / 文件名）由
+ * Gist 同步完成：只写「内容来源与时间」，配置（token / gistId / 文件名）由
  * GistPicker 自己通过 v-model:config 写回 —— 两边各管一半，不会互相覆盖。
  */
-function onGistSynced(payload: { markdown: string }) {
+function onGistSynced(payload: { markdown: string, gistId: string, fileName: string }) {
   const now = new Date().toISOString()
   resume.value.sourceId = 'gist'
   resume.value.markdown = payload.markdown
   resume.value.syncedAt = now
+  resume.value.syncedFrom = `${payload.gistId}|${payload.fileName}`
   resume.value.updatedAt = now
 }
 
@@ -239,6 +240,7 @@ async function clearAllData() {
           v-if="resumeMode === 'gist'"
           v-model:config="resume.gist"
           :synced-at="resume.syncedAt"
+          :synced-from="resume.syncedFrom"
           @synced="onGistSynced"
         />
 
@@ -336,7 +338,7 @@ async function clearAllData() {
             placeholder="sk-..."
             autocomplete="off"
           >
-          <span class="mt-1 block text-xs text-gray-400">
+          <span class="mt-1 block text-xs text-amber-700">
             ⚠ 明文存在本机，能读浏览器数据的人就能拿到；建议用设了额度上限的 Key。
           </span>
         </label>
