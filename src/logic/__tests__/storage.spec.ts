@@ -1,12 +1,16 @@
 import type { JobRecord } from '../types'
 import { describe, expect, it, vi } from 'vitest'
-import { mergeDefaults, stripRemovedRecordFields } from '../storage'
+import { normalizeResumeSource } from '../resume-sources/registry'
+import {
+  ensureSourceConfigs,
+  mergeDefaults,
+  migrateResumeShape,
+  stripRemovedRecordFields,
+} from '../storage'
 import {
   createDefaultAiSettings,
   createDefaultPromptSettings,
-  createEmptyGistSource,
   createEmptyResume,
-  normalizeResumeSource,
 } from '../types'
 
 /**
@@ -48,26 +52,17 @@ describe('mergeDefaults', () => {
       createEmptyResume(),
     )
 
-    // 新增的 Gist 配置要被补成默认值，而不是留成 undefined
     expect(merged).toEqual({ ...createEmptyResume(), markdown: '# 我' })
-    expect(merged.gist).toEqual(createEmptyGistSource())
     expect('basics' in merged).toBe(false)
   })
 
-  it('简历里已有的 Gist 配置不被默认值覆盖（token 是可选字段，留着）', () => {
+  it('嵌套对象逐层合并（来源配置是按 id 分组的映射）', () => {
     const merged = mergeDefaults(
-      {
-        markdown: '# 我',
-        gist: { token: 'ghp_x', gistId: 'aa5a315d61ae9438b18d', fileName: 'resume.md' },
-      },
+      { sources: { gist: { gistId: 'aa5a315d61ae9438b18d' } } },
       createEmptyResume(),
     )
 
-    expect(merged.gist).toEqual({
-      token: 'ghp_x',
-      gistId: 'aa5a315d61ae9438b18d',
-      fileName: 'resume.md',
-    })
+    expect(merged.sources.gist).toEqual({ gistId: 'aa5a315d61ae9438b18d' })
   })
 
   it('把早期被 JSON 字符串化的数据还原成对象，并补上新增的提示词字段', () => {
@@ -136,7 +131,8 @@ describe('stripRemovedRecordFields', () => {
  * 简历来源的收敛。
  *
  * 存储里出现 null 或已废弃的值都不该让界面处于「两个选项都没选中」的状态，
- * 它们原本的行为就是手动输入。
+ * 它们原本的行为就是手动输入。判断依据现在来自注册表而不是写死的三元表达式，
+ * 因此新增来源会自动被认。
  */
 describe('normalizeResumeSource', () => {
   it('保留 gist', () => {
@@ -148,5 +144,89 @@ describe('normalizeResumeSource', () => {
     expect(normalizeResumeSource(null)).toBe('paste')
     expect(normalizeResumeSource('pdf')).toBe('paste')
     expect(normalizeResumeSource(undefined)).toBe('paste')
+  })
+})
+
+/**
+ * 每个已注册来源都必须有一份完整形状的配置。
+ *
+ * 设置页的字段是 v-model 直接绑到 `sources[id][field]` 上的，缺键就会在渲染期
+ * 抛 "Cannot read properties of undefined"。所以「加来源不用写迁移」这条承诺
+ * 全靠这个函数。
+ */
+describe('ensureSourceConfigs', () => {
+  it('给没有配置的来源补出默认形状', () => {
+    const sources = ensureSourceConfigs(undefined)
+
+    expect(sources.gist).toEqual({ token: '', gistId: '', fileName: '' })
+    expect(sources.paste).toEqual({})
+  })
+
+  it('已有的字段值不被默认值覆盖', () => {
+    const sources = ensureSourceConfigs({
+      gist: { gistId: 'aa5a315d61ae9438b18d', token: 'ghp_x' },
+    })
+
+    expect(sources.gist).toEqual({
+      gistId: 'aa5a315d61ae9438b18d',
+      token: 'ghp_x',
+      // createConfig 声明过、但用户没填的键补成空串
+      fileName: '',
+    })
+  })
+})
+
+/**
+ * 「简历来源还是硬编码的 gist 字段」那个版本的迁移。
+ *
+ * 这两处都是**搬家/改名**：`gist` → `sources.gist`、`syncedFrom` → `syncedKey`。
+ * 丢了的后果分别是「用户手填的 Gist 配置没了」和「刚同步过却每次打开设置页都重取」
+ * —— 都不报错，所以必须有测试钉住。
+ */
+describe('migrateResumeShape', () => {
+  it('把顶层 gist 搬进 sources.gist，并补出其它来源的配置', () => {
+    const { value, changed } = migrateResumeShape({
+      markdown: '# 我',
+      sourceId: 'gist',
+      gist: { token: 'ghp_x', gistId: 'aa5a315d61ae9438b18d', fileName: 'resume.md' },
+      syncedFrom: 'aa5a315d61ae9438b18d|resume.md',
+    })
+
+    expect(changed).toBe(true)
+    const next = value as Record<string, any>
+    expect(next.gist).toBeUndefined()
+    expect(next.sources.gist).toEqual({
+      gistId: 'aa5a315d61ae9438b18d',
+      fileName: 'resume.md',
+      token: 'ghp_x',
+    })
+    expect(next.sources.paste).toEqual({})
+    // 内容标识改名但值不变 —— 换了名字就丢掉会让节流判断失效
+    expect(next.syncedFrom).toBeUndefined()
+    expect(next.syncedKey).toBe('aa5a315d61ae9438b18d|resume.md')
+    expect(next.markdown).toBe('# 我')
+  })
+
+  it('已经是新形状时原样返回并报告无改动（迁移幂等）', () => {
+    const current = {
+      markdown: '# 我',
+      sourceId: 'gist',
+      sources: { gist: { token: '', gistId: 'aa5a315d61ae9438b18d', fileName: '' } },
+      syncedKey: 'aa5a315d61ae9438b18d|',
+      syncedAt: '2026-03-01T00:00:00.000Z',
+      updatedAt: null,
+    }
+
+    const { value, changed } = migrateResumeShape(current)
+
+    // 同一个引用：调用方据此跳过写入，不必靠 JSON 比较
+    expect(changed).toBe(false)
+    expect(value).toBe(current)
+  })
+
+  it('非对象（含 undefined）不炸', () => {
+    expect(migrateResumeShape(undefined).changed).toBe(false)
+    expect(migrateResumeShape('一段文本').changed).toBe(false)
+    expect(migrateResumeShape(null).changed).toBe(false)
   })
 })

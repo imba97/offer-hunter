@@ -27,7 +27,7 @@ job JD (the one you clicked) ─────┴──> AI match score ──> op
 - 📋 **Copy, never send** — sending stays your click.
 - 🔌 **Your AI, your choice** — DeepSeek / OpenAI / Anthropic / Kimi, or a local model that keeps your resume on your machine.
 - 🧾 **Local job ledger** — results stay on your machine, so revisiting a job costs nothing.
-- 🧭 **Out of the page's way** — the UI lives in the side panel and injects nothing into the BOSS page.
+- 🧭 **Out of the page's way** — the UI lives entirely in the side panel; the only thing in the page is a passive script that listens to the site's own API responses. It never clicks, never fills, never renders UI.
 - 🩺 **Built-in diagnostics** — when the site changes, you see exactly what broke.
 
 ## Install
@@ -93,11 +93,51 @@ These are deliberate constraints, not a backlog:
 - **No signature reversing and no rate-limit circumvention.**
 - **No bulk collection.** Only the posting you clicked is read. There is no crawler, no queue and no background scraping of listings.
 
+## Architecture: two extension points
+
+The three places that will keep growing are all adapters — adding one means adding
+files, not editing the layers above.
+
+**AI platforms** — `src/platform/ai/`: `protocol` (wire format) → `platform`
+(declarative preset table) → `factory`. A new provider is one row in
+`platforms/index.ts` (default base URL, model, structured-output capability).
+
+**Resume sources** — `src/logic/resume-sources/`: an adapter contract
+(`types.ts`), a registry (one line per source), and one file per source.
+A new source is a new adapter file plus a registry line plus one value on
+`ResumeSourceId`. The settings dropdown and the background message routing read
+the registry, so neither needs editing. The sync orchestration (debounce, a
+10-minute throttle, the status machine) is shared in `useResumeSourceSync.ts`;
+a source only describes its form and how to fetch content.
+
+**Job sites** — `src/sites/`: the adapter contract (`types.ts`), the pure-data
+descriptors the background and build scripts read (`site-descriptors.ts`),
+data-driven routing (`routing.ts`), the full adapter list (`registry.ts`), and one
+directory per site holding all of that site's private logic (selectors, API calls,
+response translation, watermark cleaning). A new site is that directory plus a
+descriptor entry plus a registry line. **The manifest's host permissions and
+content scripts, and the build output paths, are all derived automatically** —
+tab routing, side-panel copy, and the AI prompts need no changes either.
+
+Two boundaries exist because we hit them:
+
+- **The background imports `routing.ts`/`site-descriptors.ts`, never `registry.ts`.**
+  Otherwise every site's selectors and DOM code get pulled into the service worker
+  bundle (`querySelector` really did show up in the background output).
+- **`SiteId` is an open string, not a literal union.** A closed union forces you to
+  edit the domain model just to add a site — the coupling this refactor removed.
+  Tests cover it instead (ids unique, ids match directory names).
+
+Site information lives outside `JobCore` (in `JobView.site`), so `matching.ts`,
+`Sidepanel.vue` and `JobDetailCard.vue` depend only on the site-agnostic
+`JobCore` — none of them change when a site is added.
+
 ## Roadmap
 
 - Resume import from PDF
 - An application tracking and statistics panel
 - Filtering out jobs you have already messaged, using the platform's own flags
+- A second job site
 
 ## Contributing
 

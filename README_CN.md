@@ -27,7 +27,7 @@
 - 📋 **只复制，不代发** —— 发送始终是你自己那一下点击。
 - 🔌 **AI 平台自己选** —— DeepSeek / OpenAI / Anthropic / Kimi，也可用本地模型（简历不出本机）。
 - 🧾 **本地岗位账本** —— 结果只存本机，回头看同一个岗位不必重算。
-- 🧭 **不打扰页面** —— 界面在侧边栏里，不向 BOSS 页面注入任何东西。
+- 🧭 **不打扰页面** —— 界面全在侧边栏，页面里只有一个被动监听接口响应的注入脚本；不点击、不代填、不渲染任何 UI。
 - 🩺 **内置诊断** —— 页面改版时能直接看出坏在哪。
 
 ## 安装
@@ -93,11 +93,60 @@ pnpm build
 - **不逆向签名，不绕过平台频率限制。**
 - **不批量采集。** 只读取你点开的那个岗位。没有爬虫、没有队列、不在后台抓列表。
 
+## 架构：两个可扩展点
+
+三处「会不断加东西」的地方都做成了适配器，新增一类只加文件、不改上层。
+
+**AI 平台** —— `src/platform/ai/`
+
+`protocol`（wire 格式）→ `platform`（声明式预设表）→ `factory`。新增一家只需在
+`platforms/index.ts` 的预设表加一行（声明默认地址、默认模型、结构化输出能力）。
+
+**简历来源** —— `src/logic/resume-sources/`
+
+```text
+types.ts        适配器契约（配置字段声明 + fetch + identify）
+registry.ts     注册表：加一行
+gist.ts/paste.ts 各自实现
+```
+
+新增来源 = 加一个适配器文件 + 在 `registry.ts` 加一行 + 在 `ResumeSourceId` 加一个值。
+设置页的下拉框、背景页的消息路由都从注册表读，**不需要改**。
+同步编排（去抖、10 分钟节流、状态机）在 `useResumeSourceSync.ts` 里共用，
+来源自己只需要写「表单长什么样」和「怎么取内容」。
+
+**招聘网站** —— `src/sites/`
+
+```text
+types.ts             适配器契约
+site-descriptors.ts  纯数据（id / 名字 / 职位页 / 匹配域名）—— 后台与构建脚本读它
+routing.ts           数据驱动的路由（认站点、匹配模式、提示文案）
+registry.ts          完整适配器清单
+boss/                某个站点的全部站点私有逻辑（选择器、接口、响应翻译、清洗）
+```
+
+新增站点 = 加一个 `sites/<id>/` 目录（`index.ts` 适配器 + `content.ts` 与
+`injected.ts` 两个三行入口）+ 在描述表加一项 + 在注册表加一行。
+**manifest 的主机权限与 content_scripts、构建的产物路径全部自动派生**，
+后台的标签页路由、侧边栏文案、AI 提示词也都不需要改。
+
+两条刻意的边界，都是踩过才定下来的：
+
+- **后台只 import `routing.ts`/`site-descriptors.ts`，绝不 import `registry.ts`。**
+  否则每个站点的选择器与 DOM 代码会被拖进 service worker 包（实测 `querySelector`
+  真的会出现在后台产物里）。`descriptors.ts` 里说明了两者的分工。
+- **`SiteId` 是开放字符串，不是字面量联合。** 闭合联合会逼着「加一个站点还要改领域模型」，
+  正是这次重构要消掉的耦合；改由测试兜底（id 唯一、与目录名一致）。
+
+站点信息藏在 `JobCore` 之外（`JobView.site`），所以 `matching.ts`、`Sidepanel.vue`、
+`JobDetailCard.vue` 只依赖站点无关的 `JobCore` —— 加站点时它们一行都不用改。
+
 ## 路线图
 
 - 简历从 PDF 导入
 - 投递记录与统计面板
 - 按平台自带的标记过滤掉已聊过的岗位
+- 接入第二个招聘网站
 
 ## 贡献
 
