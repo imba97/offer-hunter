@@ -3,12 +3,13 @@ import type { DiagnosticResult, JobRecord, JobView, MatchResult } from '~/logic/
 import type { GreetingResult } from '~/platform/ai/matching'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import ScrollArea from '~/components/ScrollArea.vue'
-import { JOBS_PAGE_URL } from '~/logic/boss/selectors'
 import { callBackground } from '~/logic/messaging'
+import { SITE_DESCRIPTORS, supportedSitesLabel } from '~/sites/routing'
 import { MessageBox } from './message-box'
 import MessageBoxHost from './MessageBox.vue'
 import {
   currentJob,
+  currentSiteTabId,
   diagnostic,
   listenForJobChanges,
   listenForTabChanges,
@@ -33,6 +34,9 @@ import QuickSettings from './views/QuickSettings.vue'
 
 type Tab = 'job' | 'diagnostics' | 'settings'
 const tab = ref<Tab>('job')
+
+/** 受支持站点的名字（单站点是「BOSS 直聘」，多站点会自动并列） */
+const sitesLabel = supportedSitesLabel()
 
 /** 用户是否手动切换过标签 —— 自动跳转只在用户没干预时发生 */
 const userSwitchedTab = ref(false)
@@ -110,9 +114,15 @@ async function forceRefresh() {
 function onJobPushed(job: JobView | null) {
   const previousKey = jobKey(currentJob.value)
   currentJob.value = job
-  // 顺手校正一次「当前标签页是不是 BOSS」：推送只可能来自 BOSS 页面，
-  // 但面板的 pageState 可能还是「从别的标签切过来时」的旧值 ——
-  // 那会让通知说「已切换到新岗位」，主体却还写着「当前标签页不是 BOSS 直聘」。
+  /*
+   * 顺手校正一次「当前标签页是不是我们的站点」：推送只可能来自站点页面，
+   * 但面板的 pageState 可能还是「从别的标签切过来时」的旧值 ——
+   * 那会让通知说「已切换到新岗位」，主体却还写着「当前标签页不是 X」。
+   *
+   * ⚠ 这里刻意只校正页面状态，**不**调 refreshCurrentJob：
+   *   岗位就是刚推过来的，再回头问一次内容脚本纯属多余，
+   *   而且会在推送与拉取之间制造无谓的往返。
+   */
   void refreshPageState()
   announceSwitch(previousKey)
 }
@@ -120,13 +130,25 @@ function onJobPushed(job: JobView | null) {
 const POLL_INTERVAL_MS = 10_000
 
 onMounted(async () => {
-  await syncRecords()
-  // 首次直接刷新，不走「切换」提示逻辑
-  await refreshCurrentJob()
+  /*
+   * 先把推送订阅挂上，再取数。
+   *
+   * 顺序要紧：refreshCurrentJob 要等「tabs.query → 后台 → 内容脚本 → 回来」
+   * 整条链路，期间内容脚本完全可能推一次 job-changed 过来 ——
+   * 订阅挂晚了那次推送就丢了，面板只能等 10s 兜底轮询。
+   */
+  stopJobPush = listenForJobChanges(onJobPushed)
+
+  /*
+   * refreshCurrentJob 内部会先做一次 tabs.query 把 pageState 摆正（那一步很快），
+   * 之后才是较慢的后台转发，所以不必在这里重复查一次标签页。
+   * 账本与岗位互不依赖，并行发，少一半等待。
+   */
+  await Promise.all([syncRecords(), refreshCurrentJob()])
+
   if (currentJob.value)
     seenFirstJob = true
 
-  stopJobPush = listenForJobChanges(onJobPushed)
   // 标签切换 / 地址变化 / 加载完成都重新取一次，不再等 10s 兜底轮询
   stopTabWatch = listenForTabChanges(() => {
     void poll()
@@ -252,8 +274,16 @@ function copyGreeting() {
 async function runDiagnostic() {
   diagnostic.running = true
   try {
+    // 诊断也要指定标签页（与取岗位看同一个），否则后台不知道该问谁
+    const tabId = await currentSiteTabId()
+    if (tabId === null) {
+      MessageBox.error(`当前标签页不是 ${sitesLabel}，无法诊断`)
+      return
+    }
+
     const res = await callBackground<{ ok: boolean, result?: DiagnosticResult, reason?: string }>(
       'relay-diagnostic',
+      { tabId },
     )
     if (res?.ok) {
       diagnostic.result = res.result ?? null
@@ -276,7 +306,10 @@ function openOptions() {
 }
 
 function openJobsPage() {
-  browser.tabs.create({ url: JOBS_PAGE_URL })
+  // 目标地址来自站点描述，加站点时这里自动生效
+  const site = SITE_DESCRIPTORS[0]
+  if (site)
+    browser.tabs.create({ url: site.jobsPageUrl })
 }
 </script>
 
@@ -322,24 +355,32 @@ function openJobsPage() {
     <ScrollArea class="min-h-0 flex-1">
       <div class="p-3">
         <div v-if="tab === 'job'">
-          <!-- 不在 BOSS 页面 -->
-          <div v-if="!pageState.onBoss" class="px-2 py-8 text-center">
+          <!--
+            还没查过标签页时不渲染任何结论：否则面板刚打开的那一瞬间会先闪出
+            「当前标签页不是 X」这句其实还没验证过的话。
+          -->
+          <div v-if="!pageState.checked" class="px-2 py-8 text-center text-xs text-gray-400">
+            正在读取当前标签页…
+          </div>
+
+          <!-- 已确认不在任何受支持的招聘网站上 -->
+          <div v-else-if="!pageState.onSupportedSite" class="px-2 py-8 text-center">
             <span class="i-tabler-world-off mx-auto mb-3 block text-3xl text-gray-300" />
             <p class="text-xs text-gray-500">
-              当前标签页不是 BOSS 直聘。<br>
-              请先在 BOSS 上打开一个职位页面。
+              当前标签页不是 {{ sitesLabel }}。<br>
+              请先在 {{ sitesLabel }} 上打开一个职位页面。
             </p>
             <button class="oh-btn oh-btn-primary mt-3" @click="openJobsPage">
-              打开 BOSS 职位页
+              打开职位页
             </button>
           </div>
 
-          <!-- 在 BOSS 页面但还没点开岗位 -->
+          <!-- 在支持的站点上但还没点开岗位 -->
           <div v-else-if="!currentJob.value" class="px-2 py-8 text-center">
             <span class="i-tabler-hand-click mx-auto mb-3 block text-3xl text-gray-300" />
             <p class="text-xs text-gray-500">
               还没有选中岗位。<br><br>
-              请在 BOSS 职位列表里<strong class="text-gray-600">点击任意岗位卡片</strong>，
+              请在职位列表里<strong class="text-gray-600">点击任意岗位卡片</strong>，
               这里会自动显示该岗位的详情与匹配分析。
             </p>
           </div>
