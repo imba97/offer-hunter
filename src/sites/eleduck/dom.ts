@@ -2,6 +2,7 @@ import type { SiteDomOutline } from '../types'
 import type { JobView } from '~/logic/types'
 import { buildDomFallbackView } from '../dom-fallback'
 import { ELEDUCK_SITE_ID } from '../site-descriptors'
+import { normalizeLines } from '../text'
 import { isJobPostPage, POST_BODY, readPostTitle } from './selectors'
 
 /**
@@ -23,26 +24,14 @@ import { isJobPostPage, POST_BODY, readPostTitle } from './selectors'
 const EMPTY_JOB_NAME = '（未能读到帖子标题）'
 
 /**
- * 文本归一化：按行 trim、丢掉空行、去掉零宽字符。
- *
- * ⚠ 保留换行而不是压成一行：JD 的段落结构是 AI 打分与阅读都要用的信息
- * （`innerText` 会按块级元素给出 `\n\n`）。
- */
-function normalizePostText(text: string): string {
-  return text
-    .replace(/[\u200B-\u200F\u2028-\u202F\uFEFF]/g, '')
-    .split('\n')
-    .map(line => line.trim())
-    .filter(line => line.length > 0)
-    .join('\n')
-}
-
-/**
  * 读元素文本。
  *
  * 优先 `innerText`：它按渲染结果给出换行（`textContent` 会把相邻块级元素的内容
  * 直接粘成一行）。**取不到时退回 `textContent`** —— jsdom 不实现 innerText，
  * 这条兜底让单测能覆盖真实逻辑；某些浏览器/未布局的后台标签页也会走到它。
+ *
+ * 逐行归一化（去零宽字符、trim、丢空行、保留换行）在 sites/text.ts，几个站点共用；
+ * 电鸭这边没有额外的行级规则要丢，所以不传 `drop`。
  */
 function textOf(el: Element | null): string {
   if (!el)
@@ -57,7 +46,7 @@ function textOf(el: Element | null): string {
   const raw = typeof inner === 'string' && inner.trim().length > 0
     ? inner
     : (el.textContent ?? '')
-  return normalizePostText(raw)
+  return normalizeLines(raw)
 }
 
 /** 正文容器本身（未渲染时返回 null） */

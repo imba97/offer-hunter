@@ -10,7 +10,12 @@
  * 两条取数路径都要清洗：
  *  1. 接口路径：`postDescription` 理论上是纯文本，但保险起见也过一遍
  *  2. DOM 回退路径：`textContent` 会把隐藏元素的文字和 `<style>` 里的 CSS 一并读出
+ *
+ * 逐行归一化本身是站点无关的（见 sites/text.ts），这个文件只声明 BOSS 独有的两件事：
+ * 页面上的水印节点怎么剪、哪些行是水印而不是正文。
  */
+
+import { normalizeLines } from '../text'
 
 /** 需要整段丢弃的标签（其内容不是正文） */
 const DROP_TAGS = new Set(['STYLE', 'SCRIPT', 'NOSCRIPT', 'TEMPLATE', 'LINK', 'META'])
@@ -104,39 +109,23 @@ export function extractCleanText(root: Element | null | undefined): string {
 /**
  * 文本层面的兜底清洗。
  *
+ * 逐行归一化（去零宽字符、trim、丢空行）交给 sites/text.ts，这里只补上 BOSS 自己的
+ * 一条行级规则：**哪些行是水印而不是正文**。
+ *
  * 处理两种残留：
  *  - 元素被删除后留下的 CSS 规则文本（形如 `.ClassName{...}` 连续成行）
- *  - 零宽 / 不可见特殊字符，以及反爬常用的全角空格填充
+ *  - 裸露的 CSS 声明片段（`display:none` 这类）
  */
 export function stripCssNoise(text: string): string {
-  if (!text)
-    return ''
-
-  const lines = text.split('\n')
-  const kept: string[] = []
-
-  for (const line of lines) {
-    const trimmed = line.trim()
-    if (!trimmed)
-      continue
-
-    // 整行都是 CSS 规则：出现 .类名{ 或 @media{ 这类特征
-    if (isCssRuleLine(trimmed))
-      continue
-
-    kept.push(trimmed)
-  }
-
-  return kept
-    .join('\n')
-    // 零宽字符与 BOM
-    .replace(/[\u200B-\u200F\u2028-\u202F\uFEFF]/g, '')
-    // 行尾多余空白
-    .replace(/[ \t]+$/gm, '')
-    .trim()
+  return normalizeLines(text, { drop: isCssRuleLine })
 }
 
-/** 判断一行文本是否像 CSS 规则而不是自然语言 */
+/**
+ * 判断一行文本是否像 CSS 规则而不是自然语言。
+ *
+ * ⚠ 判定发生在「已去掉零宽字符」之后（见 sites/text.ts 的顺序说明）：水印的类名里
+ *   混进零宽字符时，这里才不会漏判。
+ */
 function isCssRuleLine(line: string): boolean {
   // at-rule（@media / @supports …）：带花括号基本可断定是 CSS，且内部允许嵌套规则
   if (line.startsWith('@') && line.includes('{'))
