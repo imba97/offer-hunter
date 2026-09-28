@@ -52,8 +52,14 @@ const matching = useStoredValue<MatchingSettings>(
   createDefaultMatchingSettings,
 )
 
+/**
+ * 接口地址输入框的 placeholder。
+ *
+ * 直接写成**当前平台实际会用的那个地址**（而不是把上方卡片的宣传语再抄一遍）：
+ * 这个字段真正要回答的问题就是「留空是哪个地址」。
+ */
 const platformHint = computed(
-  () => AI_PLATFORM_OPTIONS.find(o => o.value === ai.value.platform)?.hint ?? '',
+  () => AI_PLATFORM_OPTIONS.find(o => o.value === ai.value.platform)?.defaultBaseUrl ?? '',
 )
 
 function setPlatform(value: AiPlatformName) {
@@ -191,7 +197,7 @@ async function clearAllData() {
             Offer Hunter
           </h1>
           <p class="text-sm text-gray-500">
-            在 BOSS 直聘上分析岗位与简历的匹配度，按需生成定制打招呼语 —— 每一步都由你手动触发，发送也由你来点
+            简历对岗位打分、生成打招呼语；每步都由你触发，发送也由你点
           </p>
         </div>
       </header>
@@ -218,8 +224,7 @@ async function clearAllData() {
       <!-- 简历 -->
       <section v-if="tab === 'resume'" class="space-y-4 rounded-lg bg-white p-6 shadow-sm">
         <div class="rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-          <strong>隐私提示：</strong>简历内容会随 JD 一起发送给你所配置的第三方 AI 平台。
-          若简历含手机号、身份证号等敏感信息，建议先脱敏。
+          <strong>隐私提示：</strong>简历会随 JD 发给第三方 AI 平台，敏感信息请先脱敏。
         </div>
 
         <label class="block">
@@ -228,9 +233,6 @@ async function clearAllData() {
             <option value="paste">手动编辑（Markdown）</option>
             <option value="gist">GitHub Gist 同步</option>
           </select>
-          <span class="mt-1 block text-xs text-gray-400">
-            两种来源最终都落到本机的同一份 Markdown 上，匹配分析只看这份内容。
-          </span>
         </label>
 
         <GistPicker
@@ -258,12 +260,10 @@ async function clearAllData() {
         </div>
 
         <p v-if="resumeMode === 'gist'" class="text-xs text-gray-400">
-          Gist 模式下这里只读：内容以 Gist 为准，本地改动会在下次同步时被覆盖。
-          想直接改内容，把来源切回「手动编辑」即可（切回来仍是你现在看到的这份）。
+          此处只读，内容以 Gist 为准；要直接改就把来源切回「手动编辑」。
         </p>
         <p v-else class="text-xs text-gray-400">
-          编辑器为 Monaco + Shiki 高亮（vitesse-dark 主题），支持 Markdown 语法着色与撤销栈。
-          内容改动会自动保存；Cmd/Ctrl + Enter 可手动触发一次保存时间戳更新。
+          内容改动会自动保存。
         </p>
       </section>
 
@@ -294,14 +294,12 @@ async function clearAllData() {
             </ScrollArea>
           </label>
           <p class="text-xs text-gray-400">
-            这些规则会作为「额外要求」追加到生成招呼语的提示词里，
-            <strong>优先级高于默认要求</strong>（冲突时以你的规则为准）。留空表示不加额外约束。
+            会追加到生成提示词里，<strong>优先级高于默认要求</strong>；留空表示不加额外约束。
           </p>
         </div>
 
         <div class="rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-          <strong>风控提示：</strong>短时间内高频打招呼、给同一人重复发消息，
-          都是平台风控的高危行为。建议从小额度开始观察账号状态。
+          <strong>风控提示：</strong>短时间高频打招呼容易触发平台风控，建议少量多次。
         </div>
       </section>
 
@@ -339,8 +337,7 @@ async function clearAllData() {
             autocomplete="off"
           >
           <span class="mt-1 block text-xs text-gray-400">
-            ⚠ 存储在 chrome.storage.local，<strong>未加密</strong>。能读取本机浏览器数据的人即可拿到。
-            建议使用设了额度上限的 Key，而不是主账号的全权 Key。
+            ⚠ 明文存在本机，能读浏览器数据的人就能拿到；建议用设了额度上限的 Key。
           </span>
         </label>
 
@@ -357,8 +354,11 @@ async function clearAllData() {
 
         <label class="block">
           <span class="mb-1 block text-sm text-gray-600">接口地址（可选）</span>
-          <input v-model="ai.baseUrl" class="oh-input font-mono" placeholder="留空用平台默认地址">
-          <span class="mt-1 block text-xs text-gray-400">{{ platformHint }}</span>
+          <input
+            v-model="ai.baseUrl"
+            class="oh-input font-mono"
+            :placeholder="platformHint ? `留空则用 ${platformHint}` : '留空则用平台默认地址'"
+          >
         </label>
 
         <!-- 连通性测试 -->
@@ -372,7 +372,7 @@ async function clearAllData() {
               {{ test.status === 'testing' ? '测试中…' : '测试连通性' }}
             </button>
             <span class="text-xs text-gray-500">
-              发一条极短请求，验证接口地址、API Key、模型名三者是否都可用
+              发一条极短请求，验证地址、Key 与模型是否可用
             </span>
           </div>
 
@@ -388,7 +388,7 @@ async function clearAllData() {
               平台 {{ test.provider }} · 模型 {{ test.model }}
             </p>
             <p class="mt-0.5 text-teal-700">
-              模型回显：{{ test.reply }}
+              模型回复：{{ test.reply }}
             </p>
           </div>
 
@@ -409,18 +409,13 @@ async function clearAllData() {
           </div>
         </div>
 
-        <p class="text-xs text-gray-400">
-          AI 请求由扩展后台发出，API Key 不会进入网页上下文。
-        </p>
-
         <!-- 数据管理 -->
         <div class="rounded-lg border border-red-200 bg-red-50/60 p-4">
           <h3 class="text-sm font-medium text-red-800">
             清空本地数据
           </h3>
           <p class="mt-1 text-xs text-red-700/80">
-            删除本扩展保存的全部内容：简历、API Key、平台配置与岗位账本。
-            浏览器里的 BOSS 登录状态不受影响。
+            删除简历、API Key、平台配置与岗位账本；BOSS 登录状态不受影响。
           </p>
           <div class="mt-3 flex items-center gap-3">
             <button

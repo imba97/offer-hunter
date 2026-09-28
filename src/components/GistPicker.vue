@@ -231,9 +231,10 @@ function formatDateTime(iso: string): string {
         @keydown="onKeydown"
       >
       <span class="mt-1 block text-xs text-gray-400">
-        填进去就会自动同步，<strong>不需要 token</strong>：公开 Gist 与 secret Gist 都能按链接读取
-        （secret 只是「不被列出」，不是访问控制 —— GitHub 官方说法是 secret gists aren't private）。
-        拿到链接的人都能读，所以简历里的手机号、身份证号之类请先脱敏。粘链接时会自动取出其中的 ID。
+        填链接或 ID 即自动同步，不需要 token。粘链接会自动取出其中的 ID。
+      </span>
+      <span class="mt-1 block text-xs text-amber-700">
+        ⚠ Secret Gist 只是不被列出，拿到链接的人都能读，请妥善保管。
       </span>
     </label>
 
@@ -246,14 +247,13 @@ function formatDateTime(iso: string): string {
         v-model="token"
         type="password"
         class="oh-input font-mono"
-        placeholder="ghp_…（留空即匿名请求）"
+        placeholder="ghp_… / github_pat_…"
         autocomplete="off"
         spellcheck="false"
       >
       <span class="mt-1 block text-xs text-gray-400">
-        <strong>填不填都能同步</strong> —— 读 Gist 不需要权限。填上只是为了额度：
-        GitHub 对匿名请求限每小时 60 次，带上任意有效 token 提到每小时 5000 次。
-        它只用于读这个 Gist，不参与 AI 请求；⚠ 与 API Key 一样明文存在 chrome.storage.local。
+        填不填都能同步；填上只为提高额度：匿名 60 次/小时 → 5000 次/小时。
+        ⚠ 与 API Key 一样明文存在本机。
       </span>
     </label>
 
@@ -269,7 +269,7 @@ function formatDateTime(iso: string): string {
         </option>
       </select>
       <span class="mt-1 block text-xs text-gray-400">
-        默认挑最像简历的那个（优先 .md，其次 .txt）。
+        默认挑最像简历的（优先 .md）。
       </span>
     </label>
 

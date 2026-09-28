@@ -61,7 +61,7 @@ const PLATFORM_PRESETS: Record<AiPlatformName, PlatformPreset> = {
     capabilities: { structuredOutput: 'json_object', maxInputChars: 60_000 },
     thinkingToggle: true,
     label: 'DeepSeek',
-    hint: '中文场景好、价格低，兼容 OpenAI 格式',
+    hint: '中文好、价格低',
   },
 
   /** OpenAI：支持最严格的结构化输出（json_schema），可靠性最高 */
@@ -73,7 +73,7 @@ const PLATFORM_PRESETS: Record<AiPlatformName, PlatformPreset> = {
     capabilities: { structuredOutput: 'json_schema', maxInputChars: 100_000 },
     thinkingToggle: false,
     label: 'OpenAI',
-    hint: '结构化输出最稳定（json_schema）',
+    hint: '结果最稳定',
   },
 
   /**
@@ -89,7 +89,7 @@ const PLATFORM_PRESETS: Record<AiPlatformName, PlatformPreset> = {
     capabilities: { structuredOutput: 'tool', maxInputChars: 180_000 },
     thinkingToggle: false,
     label: 'Anthropic',
-    hint: '长文本与指令遵循强',
+    hint: '长文本、指令遵循强',
   },
 
   /**
@@ -104,7 +104,7 @@ const PLATFORM_PRESETS: Record<AiPlatformName, PlatformPreset> = {
     capabilities: { structuredOutput: 'prompt', maxInputChars: 120_000 },
     thinkingToggle: false,
     label: 'Kimi',
-    hint: 'Anthropic 兼容协议 + Bearer 鉴权',
+    hint: '月之暗面出品，长上下文',
   },
 
   /**
@@ -156,6 +156,8 @@ export const AI_PLATFORM_OPTIONS = (
   value,
   label: PLATFORM_PRESETS[value].label,
   hint: PLATFORM_PRESETS[value].hint,
+  /** 接口地址留空时实际会用的地址，设置页直接显示它，省得用户去翻文档 */
+  defaultBaseUrl: PLATFORM_PRESETS[value].defaultBaseUrl,
 }))
 
 export type { AiProvider, AiProviderCapabilities } from '../types'
