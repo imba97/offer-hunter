@@ -1,5 +1,6 @@
 import type { JobSiteAdapter } from './types'
 import { bossSite } from './boss'
+import { eleduckSite } from './eleduck'
 
 /**
  * 完整站点适配器注册表。
@@ -22,6 +23,7 @@ import { bossSite } from './boss'
  */
 export const JOB_SITES: JobSiteAdapter[] = [
   bossSite,
+  eleduckSite,
 ]
 
 /** 按 id 取站点；未知 id 返回 undefined */

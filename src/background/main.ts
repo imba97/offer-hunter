@@ -22,7 +22,7 @@ import { detectSite, SITE_DESCRIPTORS } from '~/sites/routing'
  *     且 SW 有 host_permissions 的跨源豁免，不受 CORS 约束
  *  3. 账本读写
  *  4. **为侧边栏转发请求到内容脚本** —— 侧边栏没有页面访问权，
- *     而需要页面 Cookie 的接口只能由内容脚本代发（见站点适配器的 needsPageCookie）
+ *     而需要页面 Cookie 的接口只能由内容脚本代发（见站点适配器的 source）
  *  5. 简历来源取数（可插拔，见 logic/resume-sources）
  *
  * ⚠ 本文件**不得出现任何具体站点名或域名**：站点判断一律经 sites/registry。
@@ -83,15 +83,18 @@ if (chromeSidePanel?.setPanelBehavior) {
  * 点击图标时若不在任何支持的招聘网站上，则跳转到职位页。
  *
  * 在支持的站点上不做任何事 —— 让 setPanelBehavior 的原生开合逻辑生效。
+ *
+ * ⚠ **只在仅注册了一个站点时**才自动跳转。多站点下「默认去第一家」是个坏默认：
+ *   用户可能只用电鸭，却被送到 BOSS。多站点这种情形交给侧边栏的空状态 ——
+ *   那里按平台主色列出每个平台的职位页入口，由用户自己选。
  */
 browser.action.onClicked.addListener(async (tab) => {
   try {
     if (detectSite(tab.url))
       return
-    // 单站点时就是它的职位页；多站点时取第一个（用户可在设置里再切）
-    const target = SITE_DESCRIPTORS[0]
-    if (target)
-      await browser.tabs.create({ url: target.jobsPageUrl })
+    if (SITE_DESCRIPTORS.length !== 1)
+      return
+    await browser.tabs.create({ url: SITE_DESCRIPTORS[0].jobsPageUrl })
   }
   catch (error) {
     console.error('[offer-hunter] action click failed', error)
@@ -108,7 +111,7 @@ browser.action.onClicked.addListener(async (tab) => {
  * ⚠ 目标标签页由**面板**决定（消息里带 tabId），后台不自己去找。
  *
  * 这里曾经是「先看本窗口活动标签，不是站点就全局找任意一个站点标签页」。
- * 那个全局回退造成一个用户可见的 bug：从 BOSS 职位页切到别的页面后，
+ * 那个全局回退造成一个用户可见的 bug：从职位页切到别的页面后，
  * 面板仍然显示着岗位 —— 后台从另一个残留的站点标签页把岗位取回来了。
  * 面板表达的是「你现在看的这个标签页上的岗位」，跟着别的标签页走是错的。
  *

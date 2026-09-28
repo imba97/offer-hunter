@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import type { AiPlatformName, AiSettings, PromptSettings, Resume, ResumeSourceId } from '~/logic/types'
-import { computed, defineAsyncComponent, defineComponent, h, markRaw, ref } from 'vue'
+import { computed, defineAsyncComponent, defineComponent, h, ref } from 'vue'
 import logo from '~/assets/logo.png'
-import GistPicker from '~/components/GistPicker.vue'
 import PromptField from '~/components/PromptField.vue'
+import ResumeSourcePanel from '~/components/ResumeSourcePanel.vue'
 import ScrollArea from '~/components/ScrollArea.vue'
 import SecretInput from '~/components/SecretInput.vue'
 import { callBackground } from '~/logic/messaging'
@@ -24,8 +24,8 @@ import { AI_PLATFORM_OPTIONS } from '~/platform/ai/platforms'
  * 设置页：简历维护 + 提示词 + AI 平台配置。
  *
  * 独立标签页打开，空间充足（侧边栏太窄，放不下编辑器与完整表单）。
- * 简历来源是**可插拔的**（见 logic/resume-sources）：下拉框由注册表驱动，
- * 加一个新来源不需要改本文件 —— 只有来源自己那点表单界面要另写一个小组件。
+ * 简历来源是**可插拔的**（见 logic/resume-sources）：下拉框与来源表单都由注册表
+ * 与适配器声明驱动，加一个新来源不需要改本文件。
  *
  * 存储统一走 logic/storage 的 useStoredValue，保证与 service worker 侧
  * 读写格式一致（模板自带的 composable 会把值序列化成字符串，导致后台读不到）。
@@ -149,27 +149,21 @@ const activeSource = computed(() => getResumeSource(resumeMode.value))
 /** 下拉框选项：由注册表驱动，加来源不需要改这里 */
 const sourceOptions = resumeSourceOptions()
 
-/** 当前来源的配置对象；切换来源时立刻造出完整形状，避免表单读到 undefined */
+/**
+ * 当前来源的配置对象；切换来源时立刻造出完整形状，避免表单读到 undefined
+ */
 const activeConfig = computed<Record<string, unknown>>(() => {
   const id = resumeMode.value
   return resume.value.sources[id] ?? getResumeSource(id)?.createConfig() ?? {}
 })
 
 /**
- * 哪些来源有自定义表单组件。
+ * 内容在远端（Gist 这类）还是本地（手动输入）。
  *
- * 刻意做成查找表而不是放进适配器：适配器要被**后台**导入来做消息路由，
- * 一旦把 .vue 组件挂在适配器上，后台包就会平白多出编辑器级的依赖。
- * 因此「纯逻辑在 logic/，界面在 components/」这条分界必须守住。
+ * 从适配器读而不是写 `resumeMode === 'gist'`：那样每加一个来源都要改这里，
+ * 而漏改的症状是「远端内容被本地改坏、又不会被同步覆盖」这种静默的不一致。
  */
-const SOURCE_PICKERS: Partial<Record<ResumeSourceId, unknown>> = {
-  gist: GistPicker,
-}
-
-const ActiveSourcePicker = computed(() => {
-  const component = SOURCE_PICKERS[resumeMode.value]
-  return component ? markRaw(component as never) : null
-})
+const remoteContent = computed(() => activeSource.value?.contentSource === 'remote')
 
 function updateSourceConfig(patch: Record<string, unknown>): void {
   resume.value.sources[resumeMode.value] = patch
@@ -282,12 +276,11 @@ async function clearAllData() {
         </label>
 
         <!--
-          来源自己的表单：只有配了自定义组件的来源才渲染它。
-          「手动输入」没有远端可取，因此没有组件 —— 内容直接由下面的编辑器维护。
+          来源面板：由适配器声明的 configFields 驱动（通用组件，不需要每个来源写界面）。
+          只对「内容在远端」的来源渲染 —— 手动输入没有可同步的东西，也没有配置项。
         -->
-        <component
-          :is="ActiveSourcePicker"
-          v-if="ActiveSourcePicker"
+        <ResumeSourcePanel
+          v-if="activeSource && remoteContent"
           :adapter="activeSource"
           :config="activeConfig"
           :synced-at="resume.syncedAt"
@@ -298,7 +291,7 @@ async function clearAllData() {
 
         <div>
           <div class="mb-1 flex items-center justify-between text-sm text-gray-600">
-            <span>{{ resumeMode === 'gist' ? '简历预览（只读）' : '简历全文（Markdown）' }}</span>
+            <span>{{ remoteContent ? '简历预览（只读）' : '简历全文（Markdown）' }}</span>
             <span class="text-xs text-gray-400">
               {{ resume.markdown.length }} 字
               <template v-if="resume.updatedAt">
@@ -308,13 +301,13 @@ async function clearAllData() {
           </div>
           <MarkdownEditor
             v-model="resume.markdown"
-            :readonly="resumeMode === 'gist'"
+            :readonly="remoteContent"
             @submit="touchResume"
           />
         </div>
 
-        <p v-if="resumeMode === 'gist'" class="text-xs text-gray-400">
-          此处只读，内容以 Gist 为准；要直接改就把来源切回「手动编辑」。
+        <p v-if="remoteContent" class="text-xs text-gray-400">
+          此处只读，内容以「{{ activeSource?.label }}」为准；要直接改就把来源切回「手动编辑」。
         </p>
         <p v-else class="text-xs text-gray-400">
           内容改动会自动保存。
@@ -465,7 +458,7 @@ async function clearAllData() {
             清空本地数据
           </h3>
           <p class="mt-1 text-xs text-red-700/80">
-            删除简历、提示词、API Key、平台配置与岗位账本；BOSS 登录状态不受影响。
+            删除简历、提示词、API Key、平台配置与岗位账本；各招聘平台的登录状态不受影响。
           </p>
           <div class="mt-3 flex items-center gap-3">
             <button
@@ -496,55 +489,7 @@ async function clearAllData() {
 </template>
 
 <style scoped>
-.oh-input {
-  width: 100%;
-  border: 1px solid #d1d5db;
-  border-radius: 0.375rem;
-  padding: 0.4rem 0.6rem;
-  font-size: 0.875rem;
-  background: #fff;
-  outline: none;
-  transition: border-color 0.15s;
-}
-.oh-input:focus {
-  border-color: #0d9488;
-  box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.15);
-}
-.oh-btn-primary {
-  background: #0d9488;
-  border: none;
-  border-radius: 0.375rem;
-  padding: 0.4rem 1rem;
-  color: #fff;
-  font-size: 0.875rem;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.oh-btn-primary:hover:not(:disabled) {
-  background: #0f766e;
-}
-.oh-btn-primary:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-.oh-btn-danger {
-  border: 1px solid #dc2626;
-  border-radius: 0.375rem;
-  padding: 0.4rem 1rem;
-  background: #fff;
-  color: #b91c1c;
-  font-size: 0.875rem;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.oh-btn-danger:hover:not(:disabled) {
-  background: #dc2626;
-  color: #fff;
-}
-.oh-btn-danger:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
+/* 输入框 / 按钮的样式在 styles/main.css 里共用（见那里的说明），这里只剩编辑器占位 */
 .oh-editor-loading {
   display: flex;
   align-items: center;

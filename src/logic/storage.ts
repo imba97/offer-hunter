@@ -13,6 +13,7 @@ import {
   createDefaultAiSettings,
   createDefaultPromptSettings,
   createEmptyResume,
+  recordKey,
 } from './types'
 
 /**
@@ -230,13 +231,21 @@ export function writePromptSettings(value: PromptSettings): Promise<void> {
 // ---------------------------------------------------------------------------
 
 /**
- * 以 securityId 为键。
+ * 以 `siteId:naturalKey` 为键（见 types.ts 的 recordKey）。
  *
  * 这张表是刚需而非优化：没有它，每次刷新都会对同一批岗位重复打招呼，
  * 既浪费配额，也是风控触发点。
  */
-export function readRecords(): Promise<Record<string, JobRecord>> {
-  return read<Record<string, JobRecord>>(KEY_RECORDS, {})
+export async function readRecords(): Promise<Record<string, JobRecord>> {
+  const all = await read<Record<string, JobRecord>>(KEY_RECORDS, {})
+  /*
+   * 读的时候也归一一次（幂等、不写盘）：界面可能在 service worker 的启动迁移
+   * （ensureStorageDefaults）跑完之前就来读账本 —— 那时旧键还没改名，
+   * 查 `boss:<id>` 会全部落空（表现为「以前分析过的岗位要重新分析」）。
+   * 归一之后这次就读得对，下一次写入自然会把迁移后的键落盘。
+   */
+  migrateRecordKeys(all)
+  return all
 }
 
 /**
@@ -281,7 +290,7 @@ function pruneRecords(all: Record<string, JobRecord>): Record<string, JobRecord>
 export function upsertRecord(record: JobRecord): Promise<void> {
   return serializeLedgerWrite(async () => {
     const all = await readRecords()
-    all[record.securityId] = record
+    all[recordKey(record)] = record
     await storage.local.set({ [KEY_RECORDS]: pruneRecords(all) })
   })
 }
@@ -409,6 +418,56 @@ export function stripRemovedRecordFields(all: Record<string, JobRecord>): boolea
 }
 
 /**
+ * 把「账本键只是 securityId」那个版本的存量数据迁到站点命名空间键。
+ *
+ * 要改两处（都是**改名**，不改语义）：
+ *   键 `abc123`            → `boss:abc123`
+ *   字段 `record.securityId` → `record.naturalKey`，并补上 `record.siteId`
+ *
+ * 为什么必须做：键没有站点命名空间时，两个站点的岗位标识撞车会把 A 站的分析结果
+ * 显示到 B 站的岗位上（缓存命中错误的记录）。而**存量数据一律属于 BOSS** ——
+ * 加第二个站点之前，扩展只支持 BOSS 一家，这个前提让迁移是确定的、不需要猜。
+ *
+ * 幂等：已经带命名空间（键里有 `:`）的数据原样保留，第二次运行不做任何改动。
+ * 导出是为了单测：迁移出错的症状（旧账本的匹配结果全丢）离原因很远。
+ */
+export function migrateRecordKeys(all: Record<string, JobRecord>): boolean {
+  let changed = false
+
+  for (const [key, record] of Object.entries(all)) {
+    if (!record || typeof record !== 'object') {
+      delete all[key]
+      changed = true
+      continue
+    }
+
+    const legacy = record as JobRecord & { securityId?: unknown }
+
+    /*
+     * 键里带 `:` 说明已经迁过。这里刻意**不**用「字段在不在」判断：
+     * 一条刚写入的新记录两种信息都有，用键判断最省事也最不容易误判。
+     */
+    if (key.includes(':'))
+      continue
+
+    const siteId = typeof legacy.siteId === 'string' && legacy.siteId ? legacy.siteId : 'boss'
+    const naturalKey = typeof legacy.naturalKey === 'string' && legacy.naturalKey
+      ? legacy.naturalKey
+      : (typeof legacy.securityId === 'string' ? legacy.securityId : key)
+
+    delete legacy.securityId
+    legacy.siteId = siteId
+    legacy.naturalKey = naturalKey
+
+    delete all[key]
+    all[recordKey({ siteId, naturalKey })] = record
+    changed = true
+  }
+
+  return changed
+}
+
+/**
  * 把所有存储键补上默认值，并把已有数据里缺失的字段补齐。
  *
  * 由 service worker 每次启动时调用，保证：
@@ -462,12 +521,13 @@ export async function ensureStorageDefaults(): Promise<void> {
   if (JSON.stringify(prompts) !== JSON.stringify(existing[KEY_PROMPTS]))
     patch[KEY_PROMPTS] = prompts
 
-  // 账本：既要兼容历史上被字符串化的数据，也要抹掉已删除的字段
+  // 账本：既要兼容历史上被字符串化的数据，也要抹掉已删除的字段、补上站点命名空间键
   const recordsNeedWrite = existing[KEY_RECORDS] === undefined
     || existing[KEY_RECORDS] === null
     || typeof existing[KEY_RECORDS] === 'string'
   const records = mergeDefaults(existing[KEY_RECORDS], {}) as Record<string, JobRecord>
-  if (recordsNeedWrite || stripRemovedRecordFields(records))
+  const recordsMigrated = migrateRecordKeys(records)
+  if (recordsNeedWrite || recordsMigrated || stripRemovedRecordFields(records))
     patch[KEY_RECORDS] = records
 
   if (Object.keys(patch).length === 0)

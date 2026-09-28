@@ -3,6 +3,9 @@ import { gistSource } from '../gist'
 import { pasteSource } from '../paste'
 import { getResumeSource, normalizeResumeSource, RESUME_SOURCES, resumeSourceOptions } from '../registry'
 
+/** 一个形状像真 Gist ID 的值（十六进制），供链接解析的用例使用 */
+const GIST_ID = 'aa5a315d61ae9438b18d'
+
 /**
  * 简历来源注册表的测试。
  *
@@ -26,12 +29,56 @@ describe('注册表的内容（RESUME_SOURCES）', () => {
       expect(Array.isArray(source.configFields)).toBe(true)
       expect(typeof source.fetch).toBe('function')
       expect(typeof source.identify).toBe('function')
+      // 内容在远端还是本地：设置页据此决定要不要渲染来源面板、编辑器能不能改
+      expect(['local', 'remote']).toContain(source.contentSource)
     }
   })
 
   it('identify 在空配置下返回空串（表示「还不同步」，而不是抛错）', () => {
     for (const source of RESUME_SOURCES) {
       expect(source.identify(source.createConfig())).toBe('')
+    }
+  })
+})
+
+/**
+ * 契约的自洽性。
+ *
+ * 这些约束此前只能靠「写适配器的人记得」：configFields 声明了一个 createConfig
+ * 里没有的键，界面就会把用户输入写进一个存储里不存在的字段（下次读回来是空）；
+ * itemField 写错则是「换了文件但下次打开还是旧文件」。两种都不报错，只表现为行为不对。
+ */
+describe('契约自洽', () => {
+  it('configFields / itemField 的键都必须在 createConfig 里声明', () => {
+    for (const source of RESUME_SOURCES) {
+      const known = Object.keys(source.createConfig())
+      for (const field of source.configFields)
+        expect(known, `${source.id} 的字段 ${field.key}`).toContain(field.key)
+
+      if (source.itemField)
+        expect(known, `${source.id} 的 itemField`).toContain(source.itemField)
+    }
+  })
+
+  it('字段声明完整（key / label 非空，type 是支持的两种之一）', () => {
+    for (const source of RESUME_SOURCES) {
+      for (const field of source.configFields) {
+        expect(field.key.length, source.id).toBeGreaterThan(0)
+        expect(field.label.length, `${source.id}.${field.key}`).toBeGreaterThan(0)
+        expect(['text', 'secret'], `${source.id}.${field.key}`).toContain(field.type)
+      }
+    }
+  })
+
+  it('normalize 只管「一个字段 → 一个值」，且空输入永远合法', () => {
+    for (const source of RESUME_SOURCES) {
+      if (!source.normalize)
+        continue
+      for (const field of source.configFields) {
+        const out = source.normalize(field.key, '')
+        // 认不出空输入会让用户永远清不掉这个配置
+        expect(out, `${source.id}.normalize(${field.key}, '')`).toBe('')
+      }
     }
   })
 })
@@ -108,5 +155,29 @@ describe('gistSource', () => {
 
   it('地址认不出来时明确报错，而不是发一个空请求', async () => {
     await expect(gistSource.fetch({ gistId: '我的简历' })).rejects.toThrow('Gist 地址无法识别')
+  })
+
+  /**
+   * normalize 是「用户输入的收敛」。通用面板在失焦时调它，因此它必须
+   * 既能把链接收敛成 ID，也能在认不出来时**明确说不知道**（返回 null），
+   * 而不是悄悄把配置清掉。
+   */
+  describe('normalize', () => {
+    it('链接（含分享后缀）收敛成裸 ID', () => {
+      expect(gistSource.normalize!('gistId', `https://gist.github.com/octocat/${GIST_ID}#file-resume-md`))
+        .toBe(GIST_ID)
+    })
+
+    it('认不出来时返回 null（面板据此还原输入框，不动配置）', () => {
+      expect(gistSource.normalize!('gistId', '随便打的字')).toBeNull()
+    })
+
+    it('清空输入是合法的（用户就是想把配置清掉）', () => {
+      expect(gistSource.normalize!('gistId', '   ')).toBe('')
+    })
+
+    it('不认识的字段原样返回（面板将来加字段时不会误清）', () => {
+      expect(gistSource.normalize!('token', ' ghp_x ')).toBe(' ghp_x ')
+    })
   })
 })

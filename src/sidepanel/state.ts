@@ -6,7 +6,7 @@ import { detectSite } from '~/sites/routing'
 /**
  * 侧边栏的共享状态。
  *
- * 侧边栏是扩展页面，**不能直接读 BOSS 页面**，所有页面数据都要经由
+ * 侧边栏是扩展页面，**不能直接读招聘网站页面**，所有页面数据都要经由
  * 后台转发给内容脚本获取（见 background/main.ts 的 relay 部分）。
  */
 

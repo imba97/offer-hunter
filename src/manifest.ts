@@ -7,11 +7,14 @@ import { SITE_DESCRIPTORS, siteMatches } from './sites/routing'
 /**
  * 从站点描述生成 content_scripts。
  *
- * 每个站点两份脚本（顺序有讲究）：
+ * 有接口的站点（`source: 'api'`）两份脚本，顺序有讲究：
  *  1. MAIN world：运行在页面自身上下文，hook 页面的 fetch/XHR 被动捕获接口数据。
  *     **必须排在隔离世界脚本之前**，否则会漏掉页面首屏发出的请求。world 需要 Chrome 111+。
  *  2. ISOLATED world：只做「与页面打交道」的事。界面全部在侧边栏（扩展页面），
  *     因为需要页面 Cookie 的接口只能由内容脚本代侧边栏发起。
+ *
+ * 只读 DOM 的站点（`source: 'dom'`，如电鸭社区）**只有第二份**：它们没有任何接口
+ * 需要捕获，注入 MAIN 脚本等于给宿主页面白挂一层 fetch/XHR 包装。
  *
  * 每个站点单独打包（sites/<id>/injected.ts 与 sites/<id>/content.ts），
  * 因此新增站点只是多一组条目，不会改动既有站点的产物。
@@ -21,19 +24,26 @@ import { SITE_DESCRIPTORS, siteMatches } from './sites/routing'
  *   对不上会表现成「构建成功但脚本没注入」——src/__tests__/manifest.spec.ts 钉住了它。
  */
 function siteContentScripts(): Manifest.WebExtensionManifest['content_scripts'] {
-  return SITE_DESCRIPTORS.flatMap(site => [
-    {
-      matches: site.matches,
-      js: [`dist/injected/${site.id}.js`],
-      run_at: 'document_start' as const,
-      world: 'MAIN' as const,
-    },
-    {
+  return SITE_DESCRIPTORS.flatMap((site) => {
+    const isolated = {
       matches: site.matches,
       js: [`dist/contentScripts/${site.id}.global.js`],
       run_at: 'document_idle' as const,
-    },
-  ])
+    }
+
+    if (site.source !== 'api')
+      return [isolated]
+
+    return [
+      {
+        matches: site.matches,
+        js: [`dist/injected/${site.id}.js`],
+        run_at: 'document_start' as const,
+        world: 'MAIN' as const,
+      },
+      isolated,
+    ]
+  })
 }
 
 export async function getManifest() {

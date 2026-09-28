@@ -21,6 +21,9 @@ export const pasteSource: ResumeSourceAdapter = {
   // 没有配置项：表单区域整块不渲染
   configFields: [],
 
+  // 内容就在本地（编辑器直接改的就是它自己）：可写，且没有远端可同步
+  contentSource: 'local',
+
   identify: () => '',
 
   async fetch() {

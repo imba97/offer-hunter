@@ -62,9 +62,9 @@ export default defineConfig({
   },
   build: {
     /*
-     * watch 刻意不在这里开：dev 用 `vite build --config … --watch`（CLI 的 watch
-     * 会覆盖 config），而 scripts/build-sites.ts 走 JS API 逐个站点构建，
-     * 若这里开了 watch，第一个站点就会永远不 resolve，后面的站点根本排不上。
+     * watch 刻意不在这里开：dev 由 scripts/build-sites.ts 的 `--watch` 参数逐站点打开
+     * （见那个文件：这里开了的话，就没法「一个站点构建完再打下一个」，
+     * 而站点必须串行——它们共用同一个 OFFER_HUNTER_SITE 环境变量与 outDir）。
      */
     outDir: r('extension/dist/contentScripts'),
     cssCodeSplit: false,

@@ -4,6 +4,7 @@ import { normalizeResumeSource } from '../resume-sources/registry'
 import {
   ensureSourceConfigs,
   mergeDefaults,
+  migrateRecordKeys,
   migrateResumeShape,
   stripRemovedRecordFields,
 } from '../storage'
@@ -11,6 +12,7 @@ import {
   createDefaultAiSettings,
   createDefaultPromptSettings,
   createEmptyResume,
+  recordKey,
 } from '../types'
 
 /**
@@ -84,7 +86,7 @@ describe('mergeDefaults', () => {
   })
 
   it('动态键映射（账本）不做裁剪，否则整张表会被清空', () => {
-    const records = { a: { securityId: 'a' }, b: { securityId: 'b' } }
+    const records = { 'boss:a': { naturalKey: 'a' }, 'boss:b': { naturalKey: 'b' } }
     expect(mergeDefaults(records, {})).toEqual(records)
   })
 
@@ -106,24 +108,68 @@ describe('mergeDefaults', () => {
 describe('stripRemovedRecordFields', () => {
   it('抹掉已删除的 status，并报告发生了改动', () => {
     const records = {
-      a: { securityId: 'a', status: 'skipped', jobName: '前端' },
-      b: { securityId: 'b', status: 'drafted' },
-      c: { securityId: 'c' },
+      'boss:a': { siteId: 'boss', naturalKey: 'a', status: 'skipped', title: '前端' },
+      'boss:b': { siteId: 'boss', naturalKey: 'b', status: 'drafted' },
+      'boss:c': { siteId: 'boss', naturalKey: 'c' },
     } as unknown as Record<string, JobRecord>
 
     expect(stripRemovedRecordFields(records)).toBe(true)
     // 只动 status，其他字段与本来就没有该字段的记录原样保留
     expect(records).toEqual({
-      a: { securityId: 'a', jobName: '前端' },
-      b: { securityId: 'b' },
-      c: { securityId: 'c' },
+      'boss:a': { siteId: 'boss', naturalKey: 'a', title: '前端' },
+      'boss:b': { siteId: 'boss', naturalKey: 'b' },
+      'boss:c': { siteId: 'boss', naturalKey: 'c' },
     })
   })
 
   it('账本里已经没有旧字段时不报告改动（迁移保持幂等）', () => {
-    const records = { a: { securityId: 'a', match: null } } as unknown as Record<string, JobRecord>
+    const records = { 'boss:a': { siteId: 'boss', naturalKey: 'a', match: null } } as unknown as Record<string, JobRecord>
 
     expect(stripRemovedRecordFields(records)).toBe(false)
+  })
+})
+
+/**
+ * 账本键的站点命名空间迁移。
+ *
+ * 加第二个站点之前，键只是 securityId。没有命名空间时两家的标识撞车会把 A 站的
+ * 分析结果显示到 B 站的岗位上（缓存命中错的记录）。存量数据一律属于 BOSS ——
+ * 那个年代扩展只支持 BOSS 一家，迁移因此是确定的。
+ */
+describe('migrateRecordKeys', () => {
+  it('把裸 securityId 键迁成 boss:<id>，字段一并改名', () => {
+    const records = {
+      abc123: { securityId: 'abc123', title: '前端', match: null },
+    } as unknown as Record<string, JobRecord>
+
+    expect(migrateRecordKeys(records)).toBe(true)
+    expect(records).toEqual({
+      'boss:abc123': { siteId: 'boss', naturalKey: 'abc123', title: '前端', match: null },
+    })
+    // securityId 是 BOSS 的字段名，不该继续留在记录里
+    expect('securityId' in records['boss:abc123']).toBe(false)
+  })
+
+  it('已经带命名空间的记录原样保留（迁移幂等）', () => {
+    const records = {
+      'eleduck:z1fRK7': { siteId: 'eleduck', naturalKey: 'z1fRK7', title: '寻投手' },
+    } as unknown as Record<string, JobRecord>
+
+    expect(migrateRecordKeys(records)).toBe(false)
+    expect(records).toEqual({
+      'eleduck:z1fRK7': { siteId: 'eleduck', naturalKey: 'z1fRK7', title: '寻投手' },
+    })
+  })
+
+  it('键里没有、字段里也没有标识时退回用键当标识（不丢数据）', () => {
+    const records = { abc123: { title: '前端' } } as unknown as Record<string, JobRecord>
+
+    expect(migrateRecordKeys(records)).toBe(true)
+    expect(records[recordKey({ siteId: 'boss', naturalKey: 'abc123' })].title).toBe('前端')
+  })
+
+  it('账本为空时不动，也不报告改动', () => {
+    expect(migrateRecordKeys({})).toBe(false)
   })
 })
 

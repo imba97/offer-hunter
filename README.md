@@ -12,7 +12,7 @@ English | [简体中文](./README_CN.md)
   <img src="./extension/assets/icon-128.png" alt="Offer Hunter" width="128">
 </p>
 
-Scores how well your resume matches a job posting on BOSS Zhipin, then drafts a tailored opener for you. It lives in the browser's side panel, sends nothing but the job you clicked and your own resume to the AI platform you configure, and never sends the message itself — you copy, you paste, you click send.
+Scores how well your resume matches a job posting on BOSS Zhipin or eleduck, then drafts a tailored opener for you. It lives in the browser's side panel, sends nothing but the job you clicked and your own resume to the AI platform you configure, and never sends the message itself — you copy, you paste, you click send.
 
 ```text
 resume (Markdown / GitHub Gist) ──┐
@@ -29,6 +29,7 @@ job JD (the one you clicked) ─────┴──> AI match score ──> op
 - 🧾 **Local job ledger** — results stay on your machine, so revisiting a job costs nothing.
 - 🧭 **Out of the page's way** — the UI lives entirely in the side panel; the only thing in the page is a passive script that listens to the site's own API responses. It never clicks, never fills, never renders UI.
 - 🩺 **Built-in diagnostics** — when the site changes, you see exactly what broke.
+- 🧩 **Pluggable job sites** — BOSS Zhipin (via its API) and eleduck (page DOM only) today; adding one is a directory plus a registry line.
 
 ## Install
 
@@ -73,6 +74,17 @@ There is no store link in this repository yet, so use one of the options above.
 
 Base URL, model and max output tokens are overridable on every preset, and there is a one-click connection test. A local endpoint such as Ollama or LM Studio is a first-class choice here, not an afterthought: it is the only configuration in which neither your resume nor the job description is sent to a third party.
 
+## Supported job sites
+
+| Site | How it is read | Notes |
+| --- | --- | --- |
+| [BOSS Zhipin](https://www.zhipin.com/web/geek/jobs) | The site's own API | Captures the job detail responses passively; the richest data (salary, company, recruiter) |
+| [eleduck](https://eleduck.com/jobs-channel) | Page DOM only | Reads the title and body of a job post; no structured fields, so company and salary stay empty |
+
+The side panel's Jobs tab lists one "open jobs page" button per platform, in that platform's brand colour; open any posting from there and it becomes the job under analysis.
+
+Adding one is a `src/sites/<id>/` directory plus a registry line — see the architecture notes below.
+
 ## Privacy and security
 
 Read this before installing — it is the most important boundary of the project.
@@ -81,7 +93,7 @@ Read this before installing — it is the most important boundary of the project
 - **A secret gist is not private.** It is merely unlisted and unsearchable, and **anyone holding the link can read it** — no sign-in, no token. Use a private repository if you need real access control.
 - **Credentials sit unencrypted on this machine.** The API key (and the optional Gist token) are stored in the browser's local extension data, readable by anyone who can read the browser profile; use a key with a spending cap.
 - **Data stays on your machine.** There is no backend service; apart from the AI endpoint you configured, nothing is sent anywhere.
-- **Narrow permissions.** Host access is limited to `zhipin.com`, so the extension cannot read any other site you visit.
+- **Narrow permissions.** Host access is limited to the sites we support (`zhipin.com`, `eleduck.com`), so the extension cannot read any other site you visit.
 - **You can clear everything.** Options page → AI platforms → clear local data removes the resume, prompts, API key, platform settings and the job ledger; uninstalling does the same.
 
 ## Design boundaries
@@ -93,7 +105,7 @@ These are deliberate constraints, not a backlog:
 - **No signature reversing and no rate-limit circumvention.**
 - **No bulk collection.** Only the posting you clicked is read. There is no crawler, no queue and no background scraping of listings.
 
-## Architecture: two extension points
+## Architecture: three extension points
 
 The three places that will keep growing are all adapters — adding one means adding
 files, not editing the layers above.
@@ -105,19 +117,24 @@ files, not editing the layers above.
 **Resume sources** — `src/logic/resume-sources/`: an adapter contract
 (`types.ts`), a registry (one line per source), and one file per source.
 A new source is a new adapter file plus a registry line plus one value on
-`ResumeSourceId`. The settings dropdown and the background message routing read
-the registry, so neither needs editing. The sync orchestration (debounce, a
-10-minute throttle, the status machine) is shared in `useResumeSourceSync.ts`;
-a source only describes its form and how to fetch content.
+`ResumeSourceId`. The settings dropdown, the source form, and the background
+message routing all read the registry and the adapter's declarations, so none of
+them needs editing: the form is rendered from `configFields` (inputs),
+`normalize` (input coercion) and `itemField` (the item you can only pick after a
+fetch) by `components/ResumeSourcePanel.vue` — **an ordinary source needs no UI
+code at all**. The sync orchestration (debounce, a 10-minute throttle, the status
+machine) is shared in `useResumeSourceSync.ts`.
 
-**Job sites** — `src/sites/`: the adapter contract (`types.ts`), the pure-data
-descriptors the background and build scripts read (`site-descriptors.ts`),
-data-driven routing (`routing.ts`), the full adapter list (`registry.ts`), and one
-directory per site holding all of that site's private logic (selectors, API calls,
-response translation, watermark cleaning). A new site is that directory plus a
+**Job sites** — `src/sites/`: the adapter contract (`types.ts`, including
+`source: 'api' | 'dom'`), the pure-data descriptors the background and build
+scripts read (`site-descriptors.ts`), data-driven routing (`routing.ts`), the full
+adapter list (`registry.ts`), and one directory per site holding all of that
+site's private logic (selectors, API calls, response translation, cleaning),
+including one that reads page DOM only. A new site is that directory plus a
 descriptor entry plus a registry line. **The manifest's host permissions and
 content scripts, and the build output paths, are all derived automatically** —
-tab routing, side-panel copy, and the AI prompts need no changes either.
+tab routing, the side panel's per-platform buttons and colours, and the AI
+prompts need no changes either.
 
 Two boundaries exist because we hit them:
 
@@ -128,16 +145,32 @@ Two boundaries exist because we hit them:
   edit the domain model just to add a site — the coupling this refactor removed.
   Tests cover it instead (ids unique, ids match directory names).
 
+Two conventions come straight from real sites:
+
+- **`source: 'api' | 'dom'` is the single discriminator for how a site is read.**
+  The manifest only injects the MAIN-world script for `'api'` sites (a DOM-only site
+  has no API responses to capture, so the hook would be pure intrusion), and the
+  content script only runs the API probe and active refetch for them. Because it is
+  a discriminated union, declaring `'api'` without implementing the response
+  translation does not compile.
+- **Everything on `JobCore` except `title` is optional.** Salary, degree, funding
+  stage and friends only exist on structured APIs like BOSS's; a DOM-only source
+  naturally yields just a title and a body, and inventing the rest would invent
+  wrong data.
+
 Site information lives outside `JobCore` (in `JobView.site`), so `matching.ts`,
 `Sidepanel.vue` and `JobDetailCard.vue` depend only on the site-agnostic
-`JobCore` — none of them change when a site is added.
+`JobCore` — none of them change when a site is added. The "open the jobs page"
+buttons are rendered from the descriptors, colours included.
+
+The job ledger is keyed by `siteId:naturalKey` (see `recordKey` in
+`logic/types.ts`); data from the single-site era is migrated on startup.
 
 ## Roadmap
 
 - Resume import from PDF
 - An application tracking and statistics panel
 - Filtering out jobs you have already messaged, using the platform's own flags
-- A second job site
 
 ## Contributing
 

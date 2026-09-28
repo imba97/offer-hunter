@@ -83,7 +83,7 @@ function openOptions() {
         AI 连通性
       </h3>
       <button
-        class="oh-btn-primary w-full rounded py-1.5"
+        class="oh-btn-primary w-full"
         :disabled="testState.status === 'testing'"
         @click="runTest"
       >
@@ -106,7 +106,7 @@ function openOptions() {
     </section>
 
     <button
-      class="oh-btn-primary w-full rounded py-1.5"
+      class="oh-btn-primary w-full"
       @click="openOptions"
     >
       打开完整设置页
@@ -117,20 +117,3 @@ function openOptions() {
     </p>
   </div>
 </template>
-
-<style scoped>
-.oh-btn-primary {
-  background: #0d9488;
-  border: none;
-  color: #fff;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.oh-btn-primary:hover:not(:disabled) {
-  background: #0f766e;
-}
-.oh-btn-primary:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-</style>

@@ -1,8 +1,8 @@
-import type { JobSiteAdapter, SiteDiagnostic } from '../types'
+import type { ApiJobSiteAdapter, SiteDiagnostic } from '../types'
 import type { SiteRef } from '~/logic/types'
 import { createEmptyJobView } from '~/logic/types'
 import { hostnameOf, isHostOf } from '../descriptors'
-import { BOSS_HOSTNAMES, BOSS_MATCHES, BOSS_SITE_ID } from '../site-descriptors'
+import { BOSS_HOSTNAMES, BOSS_JOBS_PAGE_URL, BOSS_MATCHES, BOSS_SITE_ID } from '../site-descriptors'
 import { fetchJobDetail, fetchJobView, JOB_DETAIL_API, toJobView } from './api'
 import { buildDomFallbackJob, getJdElement, readJdFromDom, readJobOutlineFromDom } from './dom'
 import {
@@ -10,7 +10,6 @@ import {
   JOB_DETAIL_BOX,
   JOB_DETAIL_DESC,
   JOB_TITLE_SELECTORS,
-  JOBS_PAGE_URL,
   securityIdFromUrl,
 } from './selectors'
 
@@ -22,10 +21,17 @@ import {
  * 加第二个招聘网站时，上层（内容脚本、后台、manifest、匹配分析、侧边栏）
  * 一行都不用改。
  */
-export const bossSite: JobSiteAdapter = {
+export const bossSite: ApiJobSiteAdapter = {
   id: BOSS_SITE_ID,
   label: 'BOSS 直聘',
-  jobsPageUrl: JOBS_PAGE_URL,
+  jobsPageUrl: BOSS_JOBS_PAGE_URL,
+
+  /*
+   * ⚠ 'api' 是 BOSS 的硬约束，不是保守选择：/wapi/ 只认浏览器会话 Cookie，
+   * 而 MV3 的 service worker 发起的请求不带页面 Cookie —— 所以这些调用只能在
+   * 页面上下文（内容脚本）里发起，侧边栏必须经后台转发给它。
+   */
+  source: 'api',
 
   manifest: {
     matches: BOSS_MATCHES,
@@ -40,16 +46,10 @@ export const bossSite: JobSiteAdapter = {
    */
   matchUrl: url => isHostOf(hostnameOf(url), BOSS_HOSTNAMES),
 
-  /*
-   * ⚠ true 是 BOSS 的硬约束，不是保守选择：/wapi/ 只认浏览器会话 Cookie，
-   * 而 MV3 的 service worker 发起的请求不带页面 Cookie —— 所以这些调用只能在
-   * 页面上下文（内容脚本）里发起，侧边栏必须经后台转发给它。
-   */
-  needsPageCookie: true,
-
   naturalKeyFromUrl: securityIdFromUrl,
 
-  viewFromApiPayload: (zpData, naturalKey) => toJobView(zpData, naturalKey),
+  // 捕获到的是响应体原文，BOSS 的信封是 { code, zpData }，解包在这里做
+  viewFromApiPayload: (payload, naturalKey) => toJobView((payload as any)?.zpData, naturalKey),
 
   isDetailApiUrl: url => url.includes(JOB_DETAIL_API),
 

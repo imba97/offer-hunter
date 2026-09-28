@@ -40,8 +40,8 @@ export function siteMatches(): string[] {
 /**
  * 用户不在任何支持站点时的提示文案。
  *
- * 单站点时是「BOSS 直聘」；多站点时自动变成并列，
- * 因此调用方不必自己拼站点名（那会让每加一个站点都要改文案）。
+ * 由各站点描述的名字并列拼出（如「BOSS 直聘 / 电鸭社区」），
+ * 因此调用方不必自己拼站点名 —— 那会让每加一个站点都要改文案。
  */
 export function supportedSitesLabel(): string {
   return SITE_DESCRIPTORS.map(site => site.label).join(' / ')

@@ -49,12 +49,12 @@ function setJd(jd: string): void {
   desc.innerHTML = `<p>${jd}</p>`
 }
 
-/** 读回「当前岗位」：走内容脚本自己注册的那条消息 */
-async function currentJob() {
+/** 读回「当前岗位」：走内容脚本自己注册的那条消息（`force` = 面板上的手动刷新） */
+async function currentJob(force = false) {
   const handler = captured.handlers.get('request-current-job')
   if (!handler)
     throw new Error('内容脚本没有注册 request-current-job')
-  const res = await handler({ data: {} }) as { job: unknown }
+  const res = await handler({ data: { force } }) as { job: unknown }
   return res.job as Record<string, any> | null
 }
 
@@ -100,6 +100,8 @@ afterEach(() => {
   dispose?.()
   dispose = null
   vi.useRealTimers()
+  // 有的用例会给 window.location 打桩（模拟地址栏上的 securityId），用完必须还原
+  vi.unstubAllGlobals()
   document.body.innerHTML = ''
 })
 
@@ -206,6 +208,117 @@ describe('内容脚本的 JD 观察', () => {
     await vi.advanceTimersByTimeAsync(5000)
 
     expect(captured.sent.length).toBe(0)
+  })
+})
+
+/**
+ * 强制刷新（面板上的「刷新当前岗位」）。
+ *
+ * 真机故障：BOSS 新版职位页的地址里没有 securityId，而刷新时如果只认地址上的
+ * 标识，「同一个岗位」会被当成认不出来的岗位重建 —— 接口给的薪资/公司没了，
+ * 岗位标识也没了，于是面板查不到这份岗位的分析结果（结果只留在提示条里）。
+ *
+ * 这里的 window.location 是 jsdom 的 about:blank，正好等价于「地址里没有标识」。
+ */
+/**
+ * 站点给不出标识时的岗位身份。
+ *
+ * BOSS 新版职位页的地址里没有 securityId，而详情可能是服务端渲染（页面里没有
+ * 可捕获的接口响应）—— 这种岗位只能靠内容脚本在第一次读到它时**定下**一个本地
+ * 身份。否则页面上正文一增量渲染就换了个身份，用户刚分析过的结果会凭空消失
+ * （面板按新身份查不到旧记录，症状是「点了分析，分数只出现在提示条里」）。
+ */
+describe('没有站点标识时的岗位身份', () => {
+  it('第一次读到就定下身份，正文变长后仍是同一个身份', async () => {
+    mountDetail('岗位职责：写代码')
+    dispose = createContentScript(bossSite)
+
+    const first = await currentJob()
+    expect(first?.site.naturalKey).toMatch(/^~[0-9a-f]{16}$/)
+
+    // 页面上正文继续渲染（更完整的版本，包含原来那段）
+    setJd('岗位职责：写代码，任职要求：三年以上经验，熟悉分布式系统')
+    await vi.advanceTimersByTimeAsync(150)
+
+    const next = await currentJob()
+    expect(next?.jdText).toContain('任职要求')
+    // 身份必须没变 —— 否则账本里那份分析结果就查不回来了
+    expect(next?.site.naturalKey).toBe(first?.site.naturalKey)
+  })
+
+  it('换成另一个岗位才重新定身份', async () => {
+    mountDetail('岗位 A 的 JD')
+    dispose = createContentScript(bossSite)
+    const first = await currentJob()
+
+    // 内容完全不同（互不包含）→ 适配器认不出是同一个岗位
+    setJd('岗位 B 的 JD，内容与 A 完全不同')
+    await vi.advanceTimersByTimeAsync(150)
+
+    const next = await currentJob()
+    expect(next?.site.naturalKey).toMatch(/^~[0-9a-f]{16}$/)
+    expect(next?.site.naturalKey).not.toBe(first?.site.naturalKey)
+  })
+})
+
+describe('强制刷新', () => {
+  it('地址里没有标识时，不丢已有岗位的标识与接口数据', async () => {
+    // 页面正文比接口多几行（BOSS 的 DOM 常常如此），但接口那段包含在内 ——
+    // 适配器据此认定这是同一个岗位
+    mountDetail('岗位职责：写代码，任职要求：三年经验')
+    dispose = createContentScript(bossSite)
+
+    pushApiResponse('sid-1', '资深后端工程师', '岗位职责：写代码')
+    await vi.advanceTimersByTimeAsync(150)
+    expect((await currentJob())?.site.naturalKey).toBe('sid-1')
+
+    // 用户在面板上点「刷新当前岗位」
+    const refreshed = await currentJob(true)
+
+    // 标识沿用下来了 —— 否则账本里那份分析结果就再也查不回来
+    expect(refreshed?.site.naturalKey).toBe('sid-1')
+    // 接口给的岗位名还在（DOM 里的标题是另一个，不该反向覆盖接口数据）
+    expect(refreshed?.job.title).toBe('资深后端工程师')
+    // 正文换成页面上更完整的那份
+    expect(refreshed?.jdText).toContain('任职要求：三年经验')
+  })
+
+  it('地址里没有标识、又认不出是同一岗位时，不把接口数据降级成 DOM 数据', async () => {
+    mountDetail('页面上的 JD，与接口那份排版完全不同')
+    dispose = createContentScript(bossSite)
+
+    pushApiResponse('sid-1', '资深后端工程师', '接口里的 JD 文案')
+    await vi.advanceTimersByTimeAsync(150)
+
+    const refreshed = await currentJob(true)
+
+    // 两条兜底路径必须给出同一个答案：观察器在同样情形下也是「保留接口数据」。
+    // 降级的代价是把薪资/公司抹掉、并换掉身份，让已分析的结果变成孤儿。
+    expect(refreshed?.source).toBe('api')
+    expect(refreshed?.site.naturalKey).toBe('sid-1')
+    expect(refreshed?.job.title).toBe('资深后端工程师')
+    expect(refreshed?.jdText).toBe('接口里的 JD 文案')
+  })
+
+  it('地址上写着另一个岗位标识时，按新标识重建（这是能证伪的情形）', async () => {
+    mountDetail('岗位 B 的 JD')
+    dispose = createContentScript(bossSite)
+
+    pushApiResponse('sid-a', '岗位 A', '岗位 A 的 JD')
+    await vi.advanceTimersByTimeAsync(150)
+    expect((await currentJob())?.site.naturalKey).toBe('sid-a')
+
+    // 地址栏换成了另一个 securityId → 不是「认不出」，而是明确是另一个岗位
+    vi.stubGlobal('location', {
+      href: 'https://www.zhipin.com/job_detail/?securityId=sid-b',
+      origin: 'https://www.zhipin.com',
+    })
+
+    const refreshed = await currentJob(true)
+
+    expect(refreshed?.site.naturalKey).toBe('sid-b')
+    expect(refreshed?.source).toBe('dom')
+    expect(refreshed?.job.title).not.toBe('岗位 A')
   })
 })
 

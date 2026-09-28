@@ -14,10 +14,12 @@ import { isDev, log, r } from './utils'
  *
  * 站点清单用**目录约定**发现（src/sites/<id>/ 下有 content.ts 就算一个站点），
  * 与 sites/registry.ts 的注册项保持一致 —— 加一个站点目录 + 注册一行。
+ * 只读 DOM 的站点没有 injected.ts，因此内容脚本这一趟会发现它、注入脚本那一趟不会。
  *
  * 用法：
  *   esno scripts/build-sites.ts content
  *   esno scripts/build-sites.ts injected
+ *   esno scripts/build-sites.ts content --watch   （dev：每个站点各起一个 watcher）
  */
 
 type Target = 'content' | 'injected'
@@ -44,33 +46,49 @@ function discoverSites(target: Target): string[] {
 async function main(): Promise<void> {
   const target = process.argv[2] as Target | undefined
   if (target !== 'content' && target !== 'injected') {
-    throw new Error(`用法：esno scripts/build-sites.ts <content|injected>，收到：${target ?? '(空)'}`)
+    throw new Error(`用法：esno scripts/build-sites.ts <content|injected> [--watch]，收到：${target ?? '(空)'}`)
   }
+
+  /*
+   * watch 由这里的参数开启，而不是写在 vite 配置里：配置里开了 watch 就没法
+   * 「await 完一个站点再打下一个」（watch 模式下构建不会结束），
+   * 而站点少、串行构建的代价可以忽略。
+   */
+  const watch = process.argv.includes('--watch')
 
   const configFile = target === 'content' ? 'vite.config.content.mts' : 'vite.config.injected.mts'
   const sites = discoverSites(target)
 
-  log('BUILD', `${target}：${sites.join(', ')}`)
+  log('BUILD', `${target}：${sites.join(', ')}${watch ? '（watch）' : ''}`)
 
+  /*
+   * ⚠ 站点必须经 **process.env** 传给配置文件，不能用 build({ env })：
+   *   后者只影响 import.meta.env 的替换，而配置文件是在 Vite 的
+   *   configLoader 里读取的，它只认真正的进程环境变量（踩过：
+   *   配置里读到空值，直接抛「缺少 OFFER_HUNTER_SITE」）。
+   *
+   * ⚠ 因此这里**必须串行**，不能先把所有站点都 map 成 promise：
+   *   那样每个 async 函数会在第一个 await 之前同步跑完「写环境变量」这一步，
+   *   于是所有构建读到的都是最后一个站点的 id（产物全跑到同一个站点名下）。
+   *
+   * 串行的另一个理由：并行时两个构建会同时读写同一个 outDir，而且都拿
+   * 同一份 vite 缓存目录，实测会互相覆盖产物。站点数量是个位数，代价可忽略。
+   *
+   * watch 模式下每个站点自己的 watcher 会活到进程结束：`build()` 在首个构建
+   * 完成后 resolve（返回 watcher），所以循环能继续走到下一个站点。
+   */
   for (const site of sites) {
-    /*
-     * 逐个站点调用 Vite 的 JS API。
-     *
-     * 必须串行 await：并行时两个构建会同时读写同一个 outDir，而且都拿
-     * 同一份 vite 缓存目录，实测会互相覆盖产物。
-     * 站点数量是个位数，串行的代价可以忽略。
-     *
-     * ⚠ 站点必须经 **process.env** 传给配置文件，不能用 build({ env })：
-     *   后者只影响 import.meta.env 的替换，而配置文件是在 Vite 的
-     *   configLoader 里读取的，它只认真正的进程环境变量（踩过：
-     *   配置里读到空值，直接抛「缺少 OFFER_HUNTER_SITE」）。
-     */
     process.env.OFFER_HUNTER_SITE = site
-
     await build({
       configFile: r(configFile),
       mode: isDev ? 'development' : 'production',
+      build: watch ? { watch: {} } : undefined,
     })
+  }
+
+  if (watch) {
+    // 不删环境变量：每个 watcher 重新构建时配置会被重新求值，删了它会抛「缺少 OFFER_HUNTER_SITE」
+    return
   }
 
   delete process.env.OFFER_HUNTER_SITE

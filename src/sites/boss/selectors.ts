@@ -41,9 +41,6 @@ export const JOB_COMPANY_SELECTORS = [
   '[class*="brand"]',
 ]
 
-/** 目标页面 */
-export const JOBS_PAGE_URL = 'https://www.zhipin.com/web/geek/jobs'
-
 /**
  * 是否是我们注入脚本生效的 BOSS 页面。
  *

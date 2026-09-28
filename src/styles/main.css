@@ -18,3 +18,95 @@ body,
     hover:opacity-100 hover:text-teal-600;
   font-size: 0.9em;
 }
+
+/*
+  扩展界面的基础控件。
+
+  这些类此前在 Options.vue / Sidepanel.vue / QuickSettings.vue / Diagnostics.vue /
+  JobDetailCard.vue / 来源面板各写了一份 —— 六处独立的 `.oh-input` 与
+  `.oh-btn-primary`，颜色、圆角、内边距全靠复制保持一致。设置页与侧边栏是两个
+  入口（各自 `import '~/styles'`），所以放全局是安全的，也是唯一不会走偏的做法。
+
+  ⚠ 只在扩展页面（设置页 / 侧边栏）里用：内容脚本不引入任何样式。
+  ⚠ 形状写在这一层，调用方不要再叠 `rounded py-1.5` 之类的工具类去凑 ——
+    工具类与这些类同优先级，谁最后生效取决于 CSS 排序，那种「看起来像没写」的
+    问题很难查。要变体就加一个类，不要靠叠加。
+*/
+
+/* 输入框：设置页与来源面板共用（颜色与圆角与 .oh-btn-* 一致） */
+.oh-input {
+  width: 100%;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid #d1d5db;
+  border-radius: 0.375rem;
+  background: #fff;
+  color: inherit;
+  font-size: 0.875rem;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.oh-input:focus {
+  border-color: #0d9488;
+  box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.15);
+}
+
+/* 次要按钮：线框，悬停变主题色 */
+.oh-btn {
+  padding: 0.4rem 0.9rem;
+  border: 1px solid #d1d5db;
+  border-radius: 0.375rem;
+  background: #fff;
+  color: #374151;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.oh-btn:hover:not(:disabled) {
+  border-color: #0d9488;
+  color: #0d9488;
+}
+.oh-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* 主按钮：实心主题色（主题色是 teal-600 #0d9488，悬停 teal-700） */
+.oh-btn-primary {
+  padding: 0.4rem 0.9rem;
+  border: 1px solid #0d9488;
+  border-radius: 0.375rem;
+  background: #0d9488;
+  color: #fff;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.oh-btn-primary:hover:not(:disabled) {
+  background: #0f766e;
+  border-color: #0f766e;
+  color: #fff;
+}
+.oh-btn-primary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* 危险按钮：清空本地数据那类不可恢复的操作 */
+.oh-btn-danger {
+  padding: 0.4rem 1rem;
+  border: 1px solid #dc2626;
+  border-radius: 0.375rem;
+  background: #fff;
+  color: #b91c1c;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.oh-btn-danger:hover:not(:disabled) {
+  background: #dc2626;
+  color: #fff;
+}
+.oh-btn-danger:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

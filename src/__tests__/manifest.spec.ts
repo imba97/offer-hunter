@@ -18,29 +18,40 @@ describe('manifest 由站点描述生成', () => {
     expect(manifest.host_permissions).toHaveLength(SITE_DESCRIPTORS.flatMap(s => s.matches).length)
   })
 
-  it('每个站点都有 MAIN world 与 ISOLATED world 两份脚本，且顺序正确', async () => {
+  it('有接口的站点两份脚本（MAIN 在前），只读 DOM 的站点只要一份', async () => {
     const manifest = await getManifest()
     const scripts = manifest.content_scripts ?? []
 
-    // 每个站点两条
-    expect(scripts).toHaveLength(SITE_DESCRIPTORS.length * 2)
+    // 每个站点至少一条（隔离世界），有接口的再加一条 MAIN world
+    const expected = SITE_DESCRIPTORS.reduce((n, site) => n + (site.source === 'api' ? 2 : 1), 0)
+    expect(scripts).toHaveLength(expected)
 
-    for (const [index, site] of SITE_DESCRIPTORS.entries()) {
-      const main = scripts[index * 2]
-      const isolated = scripts[index * 2 + 1]
+    let index = 0
+    for (const site of SITE_DESCRIPTORS) {
+      if (site.source === 'api') {
+        const main = scripts[index++]
+        // MAIN world 必须排在前面：注在 document_start，否则漏掉首屏请求
+        expect(main.matches).toEqual(site.matches)
+        expect(main.js).toEqual([`dist/injected/${site.id}.js`])
+        expect(main.run_at).toBe('document_start')
+        expect(main.world).toBe('MAIN')
+      }
 
-      // MAIN world 必须排在前面：注在 document_start，否则漏掉首屏请求
-      expect(main.matches).toEqual(site.matches)
-      expect(main.js).toEqual([`dist/injected/${site.id}.js`])
-      expect(main.run_at).toBe('document_start')
-      expect(main.world).toBe('MAIN')
-
+      const isolated = scripts[index++]
       expect(isolated.matches).toEqual(site.matches)
       expect(isolated.js).toEqual([`dist/contentScripts/${site.id}.global.js`])
       expect(isolated.run_at).toBe('document_idle')
       // 隔离世界不该声明 world（默认 ISOLATED）
       expect(isolated.world).toBeUndefined()
     }
+  })
+
+  it('dOM-only 站点不会被注入 MAIN world 脚本（没有接口要捕获，挂了就是纯侵入）', async () => {
+    const manifest = await getManifest()
+    const injected = (manifest.content_scripts ?? []).filter(entry => entry.world === 'MAIN')
+
+    expect(injected.map(entry => entry.js?.[0]).sort())
+      .toEqual(SITE_DESCRIPTORS.filter(site => site.source === 'api').map(site => `dist/injected/${site.id}.js`).sort())
   })
 
   it('产物路径与构建配置的命名约定一致（写错了扩展会静默不注入）', async () => {

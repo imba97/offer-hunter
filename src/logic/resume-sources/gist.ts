@@ -1,4 +1,5 @@
 import type { ResumeSourceAdapter } from './types'
+import { str } from '~/logic/strings'
 import { buildGistContentKey, fetchGistContent, parseGistId } from '~/platform/gist/gist'
 
 /**
@@ -8,10 +9,8 @@ import { buildGistContentKey, fetchGistContent, parseGistId } from '~/platform/g
  * 谁有链接谁能看），所以 token 是可选的，只为把接口额度从匿名 60 次/小时
  * 提到 5000 次/小时。它不参与 AI 请求。
  *
- * `fileName` / `files` 刻意不在 configFields 里：文件名是同步成功后才知道的
- * （要先取一次才知道这个 Gist 有哪些文件、自动挑中了哪个），属于**取完之后的
- * 补充输入**。它由 GistPicker 的「换一个文件」下拉负责，而不是一张静态表单。
- * 这就是「不是所有来源都能用纯 schema 描述」的例子 —— 契约因此允许自定义 UI。
+ * 这个来源的界面完全由 `configFields` + `normalize` + `itemField` 描述出来，
+ * 没有任何自己的组件 —— 它正是「普通来源不需要写界面」的那份参照实现。
  */
 export interface GistConfig {
   token: string
@@ -27,11 +26,7 @@ export function createEmptyGistConfig(): GistConfig {
 
 /** 配置里的用户输入可能是链接，先收敛成 ID；认不出来返回空串 */
 function resolveGistId(config: Record<string, unknown>): string {
-  return parseGistId(typeof config.gistId === 'string' ? config.gistId : '')
-}
-
-function str(value: unknown): string {
-  return typeof value === 'string' ? value : ''
+  return parseGistId(str(config.gistId))
 }
 
 export const gistSource: ResumeSourceAdapter = {
@@ -44,8 +39,7 @@ export const gistSource: ResumeSourceAdapter = {
   configFields: [
     {
       key: 'gistId',
-      // 与自定义 UI（GistPicker 用 type="password" 遮住值）保持一致：Gist 链接
-      // 本身就是唯一的凭据，摆在设置页上等于明文公开，所以按 secret 渲染
+      // 用 secret 而不是 text：Gist 链接本身就是唯一的凭据，摆在设置页上等于明文公开
       type: 'secret',
       label: 'Gist 链接或 ID',
       placeholder: 'https://gist.github.com/user/<id> 或直接填 ID',
@@ -62,6 +56,28 @@ export const gistSource: ResumeSourceAdapter = {
       warning: '明文存在本机。',
     },
   ],
+
+  // 内容以 Gist 为准：设置页的编辑器只读，来源面板负责取数
+  contentSource: 'remote',
+
+  /**
+   * 输入收敛：链接（含带 `#file-xxx` 的分享链接）→ 裸 ID。
+   *
+   * 认不出来时返回 null，面板会还原输入框并就地提示 —— 悄悄把一个填好的 ID 清掉
+   * 比留着旧值更糟。空输入始终合法（用户就是要清掉这个配置）。
+   */
+  normalize(field, value) {
+    if (field !== 'gistId')
+      return value
+
+    const gistId = parseGistId(value)
+    if (gistId)
+      return gistId
+    return value.trim() ? null : ''
+  },
+
+  itemField: 'fileName',
+  itemLabel: '同步哪个文件',
 
   identify(config) {
     /*

@@ -40,7 +40,7 @@ export default defineConfig({
   },
   plugins: [],
   build: {
-    // watch 由 CLI 的 --watch 打开，理由见 vite.config.content.mts
+    // watch 由 scripts/build-sites.ts 的 `--watch` 打开，理由见 vite.config.content.mts
     outDir: r('extension/dist/injected'),
     cssCodeSplit: false,
     emptyOutDir: false,

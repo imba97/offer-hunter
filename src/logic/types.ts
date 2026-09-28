@@ -163,7 +163,13 @@ export type SiteId = string
 export interface SiteRef {
   /** 哪个站点；同时是账本主键的命名空间来源 */
   siteId: SiteId
-  /** 站点内唯一且稳定的岗位标识（BOSS = securityId） */
+  /**
+   * 站点内唯一且稳定的岗位标识。
+   *
+   * 通常是站点自己给的（BOSS = URL 上的 securityId，电鸭 = /posts/<slug>）。
+   * **站点给不出时这里是本地按岗位内容算出的摘要**（形如 `~1a2b3c4d`，见
+   * jobIdentity）—— 那种岗位在平台上只存在于当前页面，没有可供深链的标识。
+   */
   naturalKey: string
   /** 站点私有 id，原样保留供将来深链/刷新用，上层不读 */
   ids?: Record<string, string>
@@ -191,6 +197,11 @@ export interface RecruiterCore {
  * 字段名刻意去掉站点色彩（jobName→title、brandName→company、bossName→recruiter）：
  * 这样加第二个招聘网站时，matching.ts / Sidepanel.vue / JobDetailCard.vue
  * 一行都不用改，只有站点适配器负责把自己的 wire 格式翻译成这个形状。
+ *
+ * ⚠ **除 `title` 外全部可选，且界面与提示词都必须容忍缺失。** 这些字段（薪资、
+ *   学历、融资阶段、技能标签…）是 BOSS 那类结构化接口才有的东西；只读页面 DOM
+ *   的来源（电鸭社区）天然只给得出「标题 + JD 正文」，硬凑只会凑出错误信息。
+ *   因此适配器不实现它们不算缺陷，面板里对应的一行不渲染即可。
  *
  * 原先这里是 18 个必填字段且交织着 BOSS 私有字段（securityId / encryptJobId /
  * bossOnline），导致「领域模型」实际上就是 BOSS 的接口格式。
@@ -246,7 +257,7 @@ export function createEmptyJobView(patch: Partial<JobView> = {}): JobView {
 }
 
 /**
- * 岗位的本地记录（账本），以 securityId 为键。
+ * 岗位的本地记录（账本），键由 `recordKey()` 从 `siteId:naturalKey` 算出。
  *
  * 所有动作都由用户手动触发，所以这张表不是「待办队列」，而是**结果缓存**：
  * 在岗位之间来回切换时，之前算过的匹配结果与生成过的招呼语要能原样回来，
@@ -261,11 +272,15 @@ export function createEmptyJobView(patch: Partial<JobView> = {}): JobView {
  * 存量记录里没有 `job` 这个键 → 会被填成 undefined → 面板读 `record.job.title`
  * 直接抛 TypeError。扁平字段名与旧记录一一对应，老数据天然读得出来。
  *
- * securityId 同理保留原名：它同时是这张表的键，改名会让存量账本的键失效。
- * 多站点接入时这里要换成 `siteId:naturalKey` 命名空间键（记忆：本步不动存储格式）。
+ * 键曾经只是 `securityId`（那个年代只有 BOSS）。加了第二个站点之后必须带站点
+ * 命名空间，否则两家的标识撞车就会把 A 站的分析结果显示到 B 站的岗位上；
+ * 迁移在 storage.ts 的 migrateRecordKeys 里做（旧数据一律属于 BOSS）。
  */
 export interface JobRecord {
-  securityId: string
+  /** 哪个站点（账本键的命名空间） */
+  siteId: SiteId
+  /** 站点内岗位标识：BOSS 是 URL 上的 securityId，电鸭是 /posts/<slug> 的 slug */
+  naturalKey: string
   title: string
   company: string
   recruiterName: string
@@ -275,6 +290,81 @@ export interface JobRecord {
   /** 匹配或生成失败的原因 */
   error: string | null
   firstSeen: string
+}
+
+/**
+ * 账本的键：`<siteId>:<naturalKey>`。
+ *
+ * 单独抽成函数而不是各处拼字符串：键的拼法一旦在两处不一致，症状是
+ * 「分析成功了但切回来又要重算」——很难联想到是键写歪了。
+ */
+export function recordKey(ref: { siteId: SiteId, naturalKey: string }): string {
+  return `${ref.siteId}:${ref.naturalKey}`
+}
+
+/**
+ * 岗位的账本身份。
+ *
+ * 优先用站点给的天然标识（`site.naturalKey`）。**站点给不出时**退回一个按岗位
+ * 内容算出的稳定摘要（前缀 `~`，与站点标识区分开）—— 这条退路是必须的：
+ *
+ * BOSS 新版职位页的地址里没有 securityId，而详情内容可能整块由服务端渲染
+ * （页面上没有任何可捕获的详情接口响应），于是 DOM 兜底路径拿不到任何站点标识。
+ * 若那时放弃记账，用户点「匹配度分析」后结果**只会出现在提示条里**，面板永远
+ * 看不到分数与理由（真机故障）。有了摘要，这种岗位照样存得下、也查得回。
+ *
+ * ⚠ 摘要只取「标题 + JD 开头一段」而不是全文：页面上 JD 常常是**增量**渲染的
+ *   （先出摘要、展开后出全文），用全文算，内容一变长就变成另一个身份，
+ *   等于每次都要重新分析。
+ */
+export function jobIdentity(view: Pick<JobView, 'job' | 'site' | 'jdText'>): SiteRef {
+  if (view.site.naturalKey)
+    return view.site
+  return { ...view.site, naturalKey: localJobKey(view) }
+}
+
+/**
+ * 给「站点给不出标识」的岗位算一个本地身份（前缀 `~`）。
+ *
+ * 内容脚本在造 DOM 兜底岗位时用它**定下**身份，之后只更新内容、不改身份
+ * （见 sites/content-script.ts）：否则页面正文一增量渲染就换了个身份，
+ * 用户刚分析过的结果会凭空消失。
+ */
+export function localJobKey(view: Pick<JobView, 'job' | 'jdText'> | { title?: string, jdText: string }): string {
+  return `~${contentDigest(view)}`
+}
+
+/** 摘要取样长度：够区分岗位，又不至于被「逐步加载的正文」影响 */
+const IDENTITY_SAMPLE_CHARS = 200
+
+/**
+ * 岗位内容的短摘要（64 位十六进制）。
+ *
+ * 刻意用 FNV-1a 这种小实现而不是 crypto.subtle：后者是异步的，而身份要在
+ * 同步路径上算出来（渲染、记账都等着它），且这里只需要「稳定 + 够短」。
+ *
+ * ⚠ 跑两遍、拼成 64 位而不是只用一个 32 位：账本上限 2000 条，单个 32 位
+ *   在千条规模下已有约万分之一的撞车概率，而撞车的后果是**打开 A 岗位看到
+ *   B 岗位的分析结果**这种静默错配。多跑一遍 ≤200 字符的循环可以忽略。
+ */
+function contentDigest(view: { job?: { title?: string }, title?: string, jdText: string }): string {
+  const title = view.title ?? view.job?.title ?? ''
+  const sample = `${title}\u0000${view.jdText}`
+    .replace(/\s+/g, ' ')
+    .slice(0, IDENTITY_SAMPLE_CHARS)
+
+  // 两个不同的偏移基：同一个输入得到互不相关的两半
+  return `${fnv1a(sample, 0x811C9DC5)}${fnv1a(sample, 0x01000193)}`
+}
+
+/** 32 位 FNV-1a，返回定长十六进制 */
+function fnv1a(text: string, basis: number): string {
+  let hash = basis
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0')
 }
 
 // ---------------------------------------------------------------------------
@@ -317,11 +407,25 @@ export interface DiagnosticResult {
   currentJobName: string | null
   /** 岗位信息来源：接口捕获 / DOM 回退 */
   currentJobSource: 'api' | 'dom' | null
+  /**
+   * 当前岗位的账本键（`<siteId>:<naturalKey>`）。
+   *
+   * 摆在诊断里是为了让「面板为什么不显示分析结果」这类问题一眼可见：
+   * 键是 `站点:~xxxx` 说明这个岗位没有站点标识、用的是本地内容摘要。
+   */
+  currentJobKey: string | null
   jdLength: number
   /** DOM 兜底读到的岗位标识（空串表示关键词选择器没命中，需要按真机调整） */
   domOutline?: { jobName: string, brandName: string }
+  /**
+   * 详情接口契约探针的结果。
+   *
+   * `null` 有两种含义，由「站点有没有接口」区分（面板据此换文案）：
+   *  - `source: 'api'` 的站点：还没有拿到岗位标识，无从探测
+   *  - `source: 'dom'` 的站点：本站点没有接口契约可验，这个探针永远不跑
+   */
   detailProbe: {
-    securityId: string
+    naturalKey: string
     ok: boolean
     hasPostDescription: boolean
     jdPreview: string

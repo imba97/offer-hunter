@@ -8,7 +8,7 @@ import SecretInput from '../SecretInput.vue'
  * 要紧的只有三件事：
  *  - 默认必须是密文（漏成明文就等于把凭据摆在设置页上）
  *  - 眼睛真的能来回切，图标/读屏名字跟着变
- *  - 写在这个组件上的属性与监听器要落在**内层 input** 上（GistPicker 的
+ *  - 写在这个组件上的属性与监听器要落在**内层 input** 上（来源面板的
  *    「失焦才提交」全靠 `@blur` 透传；落在根 div 上会静默失效，因为 blur 不冒泡）
  */
 
@@ -76,7 +76,7 @@ describe('secretInput', () => {
 
     wrapper.get('button').element.dispatchEvent(event)
 
-    // 不 prevent 的话，GistPicker 里会先触发一次失焦提交，用户得点第二下才切到明文
+    // 不 prevent 的话，来源面板里会先触发一次失焦提交，用户得点第二下才切到明文
     expect(event.defaultPrevented).toBe(true)
   })
 })

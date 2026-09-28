@@ -4,6 +4,7 @@ import type { GreetingResult } from '~/platform/ai/matching'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import ScrollArea from '~/components/ScrollArea.vue'
 import { callBackground } from '~/logic/messaging'
+import { jobIdentity, recordKey } from '~/logic/types'
 import { SITE_DESCRIPTORS, supportedSitesLabel } from '~/sites/routing'
 import { MessageBox } from './message-box'
 import MessageBoxHost from './MessageBox.vue'
@@ -27,7 +28,7 @@ import QuickSettings from './views/QuickSettings.vue'
  * 侧边栏主体：当前岗位详情 + 匹配流程 + 诊断 + 快捷设置。
  *
  * 与页面内悬浮面板相比，这里是**浏览器原生侧边栏**：
- * 定位、层级、遮挡全部由浏览器处理，不会再与 BOSS 自己的悬浮按钮冲突。
+ * 定位、层级、遮挡全部由浏览器处理，不会再与招聘网站自己的悬浮按钮冲突。
  *
  * 代价是侧边栏没有页面访问权，因此岗位数据要经后台转发给内容脚本获取。
  */
@@ -35,7 +36,7 @@ import QuickSettings from './views/QuickSettings.vue'
 type Tab = 'job' | 'diagnostics' | 'settings'
 const tab = ref<Tab>('job')
 
-/** 受支持站点的名字（单站点是「BOSS 直聘」，多站点会自动并列） */
+/** 受支持站点的名字（多站点时自动并列） */
 const sitesLabel = supportedSitesLabel()
 
 /** 用户是否手动切换过标签 —— 自动跳转只在用户没干预时发生 */
@@ -47,10 +48,11 @@ function selectTab(t: Tab) {
 
 const record = computed<JobRecord | null>(() => {
   const job = currentJob.value
-  const key = job?.site.naturalKey
-  if (!key)
+  if (!job)
     return null
-  return records[key] ?? null
+  // 与 persist 用同一个身份函数：两边各自拼键的话，一旦站点给不出标识
+  // （BOSS 新版职位页）就会出现「结果写进去了、面板查不到」的静默不一致
+  return records[recordKey(jobIdentity(job))] ?? null
 })
 
 const busy = ref({ matching: false, greeting: false })
@@ -165,14 +167,26 @@ onUnmounted(() => {
   stopTabWatch = null
 })
 
-async function persist(patch: Partial<JobRecord>) {
-  const job = currentJob.value
-  const key = job?.site.naturalKey
-  if (!key)
-    return
+/**
+ * 写账本。
+ *
+ * ⚠ `job` 由调用方传进来（分析/生成时捕获的那一份），**不在这里重读
+ *   currentJob**：AI 调用要等好几秒，期间内容脚本完全可能推来一份新的岗位视图
+ *   （长 JD 的页面更容易发生 —— 正文是增量渲染的）。重读就会把这份岗位的结果
+ *   记到那份岗位上，或者因为新视图没有站点标识而整个丢掉（真机故障：分数只出现
+ *   在提示条里）。写完之后面板会按**当前**岗位的身份去查，所以「分析期间切了
+ *   岗位」也不会串结果：结果留在原岗位名下，切回去就能看到。
+ *
+ * 身份由 jobIdentity 给出：站点标识缺失时用本地内容摘要兜底，因此这份结果
+ * 一定存得下（见 logic/types.ts 的说明）。
+ */
+async function persist(job: JobView, patch: Partial<JobRecord>) {
+  const identity = jobIdentity(job)
+  const key = recordKey(identity)
   const existing = records[key]
   const next: JobRecord = {
-    securityId: key,
+    siteId: identity.siteId,
+    naturalKey: identity.naturalKey,
     title: job.job.title,
     company: job.job.company ?? '',
     recruiterName: job.job.recruiter?.name ?? '',
@@ -190,6 +204,11 @@ async function persist(patch: Partial<JobRecord>) {
   catch (error) {
     console.warn('[offer-hunter] 写入账本失败', error)
   }
+}
+
+/** 当前岗位已存下的分析结果（生成招呼语时要带上它，让文案更贴合） */
+function matchOf(job: JobView): MatchResult | null {
+  return records[recordKey(jobIdentity(job))]?.match ?? null
 }
 
 async function runMatch() {
@@ -212,19 +231,19 @@ async function runMatch() {
     // 与 runGreeting 同理：`res.data as MatchResult` 这种断言正好绕过了「data 可能没有」，
     // 运行时会在 match.score 上炸成一句看不懂的报错，所以这里显式判空
     if (!res.ok || !res.data) {
-      await persist({ error: res.error ?? '分析失败：没有拿到结果' })
+      await persist(job, { error: res.error ?? '分析失败：没有拿到结果' })
       MessageBox.update(pending, res.error ?? '分析失败：没有拿到结果', { kind: 'error' })
       return
     }
 
     const match = res.data
-    await persist({ match, error: null })
+    await persist(job, { match, error: null })
     // 只有一条成功提示：没有阈值判定，也就没有「达标 / 未达标」两套文案
     MessageBox.update(pending, `匹配度 ${match.score}：${match.summary}`, { kind: 'success' })
   }
   catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
-    await persist({ error: msg })
+    await persist(job, { error: msg })
     MessageBox.update(pending, msg, { kind: 'error' })
   }
   finally {
@@ -243,7 +262,8 @@ async function runGreeting() {
   try {
     const res = await callBackground<{ ok: boolean, data?: GreetingResult, error?: string }>(
       'ai-greeting',
-      { job: job.job, jdText: job.jdText, match: record.value?.match ?? null },
+      // 带上这份岗位自己的分析结论（不是面板当前显示的那份）
+      { job: job.job, jdText: job.jdText, match: matchOf(job) },
     )
     // `data` 在类型上是可选的：契约被破坏时（ok=true 但没带内容）不能直接取 .greeting，
     // 那会抛 "Cannot read properties of undefined"，只剩一句看不懂的报错
@@ -251,8 +271,8 @@ async function runGreeting() {
       MessageBox.update(pending, res.error ?? '生成失败：没有拿到招呼语内容', { kind: 'error' })
       return
     }
-    await persist({ greeting: res.data.greeting })
-    MessageBox.update(pending, '招呼语已生成，点「复制」后到 BOSS 粘贴发送', { kind: 'success' })
+    await persist(job, { greeting: res.data.greeting })
+    MessageBox.update(pending, '招呼语已生成，点「复制」后粘贴到岗位的打招呼输入框', { kind: 'success' })
   }
   catch (error) {
     MessageBox.update(pending, error instanceof Error ? error.message : String(error), { kind: 'error' })
@@ -305,11 +325,14 @@ function openOptions() {
   browser.runtime.openOptionsPage()
 }
 
-function openJobsPage() {
-  // 目标地址来自站点描述，加站点时这里自动生效
-  const site = SITE_DESCRIPTORS[0]
-  if (site)
-    browser.tabs.create({ url: site.jobsPageUrl })
+/**
+ * 打开某个平台的默认职位页。
+ *
+ * 目标地址与配色都来自站点描述 —— 加一个平台时这里自动多一个按钮，
+ * 不需要在界面上写任何平台名。
+ */
+function openJobsPage(site: (typeof SITE_DESCRIPTORS)[number]) {
+  browser.tabs.create({ url: site.jobsPageUrl })
 }
 </script>
 
@@ -367,12 +390,24 @@ function openJobsPage() {
           <div v-else-if="!pageState.onSupportedSite" class="px-2 py-8 text-center">
             <span class="i-tabler-world-off mx-auto mb-3 block text-3xl text-gray-300" />
             <p class="text-xs text-gray-500">
-              当前标签页不是 {{ sitesLabel }}。<br>
-              请先在 {{ sitesLabel }} 上打开一个职位页面。
+              当前标签页不是受支持的招聘网站。<br>
+              先打开一个平台的职位列表，再点开里面的岗位。
             </p>
-            <button class="oh-btn oh-btn-primary mt-3" @click="openJobsPage">
-              打开职位页
-            </button>
+            <!--
+              每个注册平台一个按钮，背景用平台自己的主色（来自站点描述）。
+              列表页只是入口：岗位内容仍然要在具体职位/帖子页上点开。
+            -->
+            <div class="mt-3 flex flex-col items-center gap-1.5">
+              <button
+                v-for="site in SITE_DESCRIPTORS"
+                :key="site.id"
+                class="oh-jobs-btn"
+                :style="{ backgroundColor: site.color, color: site.textColor }"
+                @click="openJobsPage(site)"
+              >
+                打开{{ site.label }}职位页
+              </button>
+            </div>
           </div>
 
           <!-- 在支持的站点上但还没点开岗位 -->
@@ -384,7 +419,6 @@ function openJobsPage() {
               这里会自动显示该岗位的详情与匹配分析。
             </p>
           </div>
-
           <JobDetailCard
             v-else
             :job="currentJob.value"
@@ -442,28 +476,21 @@ function openJobsPage() {
   color: #111827;
 }
 
-.oh-btn {
-  padding: 0.35rem 0.75rem;
-  border: 1px solid #d1d5db;
-  border-radius: 0.25rem;
-  background: #fff;
-  color: #374151;
+/*
+  「打开 X 职位页」按钮：背景与文字色都由站点描述给（内联 style），
+  这里只管尺寸与悬停，不写任何平台色 —— 加平台时不需要改样式表。
+*/
+.oh-jobs-btn {
+  width: 11rem;
+  padding: 0.4rem 0.75rem;
+  border: none;
+  border-radius: 0.375rem;
   font-size: 0.75rem;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: filter 0.15s;
 }
-.oh-btn:hover:not(:disabled) {
-  border-color: #0d9488;
-  color: #0d9488;
-}
-.oh-btn-primary {
-  background: #0d9488;
-  border-color: #0d9488;
-  color: #fff;
-}
-.oh-btn-primary:hover:not(:disabled) {
-  background: #0f766e;
-  border-color: #0f766e;
-  color: #fff;
+.oh-jobs-btn:hover {
+  /* 用 filter 而不是换一个颜色：品牌色是配置，代码不该去算它的深浅 */
+  filter: brightness(0.94);
 }
 </style>

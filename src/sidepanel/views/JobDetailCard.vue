@@ -210,7 +210,7 @@ const jdLines = computed(() => jdText.value.split('\n').filter(l => l.trim().len
 
     <!-- 操作 -->
     <div class="flex flex-wrap items-center gap-2 text-xs">
-      <button class="oh-btn oh-btn-primary" :disabled="busy.matching" @click="$emit('match')">
+      <button class="oh-btn-primary" :disabled="busy.matching" @click="$emit('match')">
         {{ busy.matching ? '分析中…' : (match ? '重新分析' : '匹配度分析') }}
       </button>
 
@@ -236,33 +236,5 @@ const jdLines = computed(() => jdText.value.split('\n').filter(l => l.trim().len
 */
 .oh-jd :deep(.oh-scroll-viewport) {
   padding: 0.5rem 1rem 0.5rem 0.75rem;
-}
-
-.oh-btn {
-  padding: 0.35rem 0.75rem;
-  border: 1px solid #d1d5db;
-  border-radius: 0.25rem;
-  background: #fff;
-  color: #374151;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-.oh-btn:hover:not(:disabled) {
-  border-color: #0d9488;
-  color: #0d9488;
-}
-.oh-btn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-.oh-btn-primary {
-  background: #0d9488;
-  border-color: #0d9488;
-  color: #fff;
-}
-.oh-btn-primary:hover:not(:disabled) {
-  background: #0f766e;
-  border-color: #0f766e;
-  color: #fff;
 }
 </style>

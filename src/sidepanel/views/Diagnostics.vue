@@ -6,6 +6,9 @@ import type { DiagnosticResult } from '~/logic/types'
  *
  * 存在的理由：本项目的接口字段与选择器来自社区实测记录，平台改版即失效。
  * 与其写一次性脚本，不如把它做成面板里的常驻功能 —— 改版后能立刻定位坏在哪。
+ *
+ * 这里的文案一律**不带平台名**：面板要服务所有已注册站点（有的走接口、
+ * 有的只读页面 DOM），写死某一家会让另一家的诊断结果看起来像坏了。
  */
 
 /**
@@ -22,10 +25,17 @@ withDefaults(defineProps<{
 
 defineEmits<{ run: [] }>()
 
+/**
+ * 接口地址的展示裁剪。
+ *
+ * 只显示 pathname（查询串往往是 base64 签名，又长又不可读），并丢掉过长的路径前缀，
+ * 让每条记录都能在一行里看完。刻意不针对某个平台的接口路径做特判。
+ */
 function shortUrl(url: string): string {
   try {
     const u = new URL(url, location.origin)
-    return u.pathname.replace('/wapi/zpgeek/', '')
+    const path = u.pathname.replace(/^\/+/, '')
+    return path.length > 48 ? `…${path.slice(-48)}` : path
   }
   catch {
     return url
@@ -36,7 +46,7 @@ function shortUrl(url: string): string {
 <template>
   <div class="p-3 text-xs">
     <button
-      class="oh-btn-primary mb-3 w-full rounded py-1.5"
+      class="oh-btn-primary mb-3 w-full"
       :disabled="running"
       @click="$emit('run')"
     >
@@ -54,7 +64,7 @@ function shortUrl(url: string): string {
           已捕获接口 ({{ result.capturedApis.length }})
         </h3>
         <p v-if="result.capturedApis.length === 0" class="text-gray-400">
-          暂无。请刷新 BOSS 职位列表页。
+          暂无。请刷新职位列表页后再点开一个岗位。
         </p>
         <ul v-else class="space-y-1">
           <li
@@ -96,6 +106,13 @@ function shortUrl(url: string): string {
             来源：{{ result.currentJobSource === 'api' ? '详情接口 ✓' : 'DOM 回退（薪资等字段可能缺失）' }}
             · JD {{ result.jdLength }} 字
           </p>
+          <!--
+            账本键摆在这里：分析结果就是按它存的，面板也是按它查的。
+            前缀 `~` 表示这个岗位没有站点标识（用内容摘要兜底），不是坏值。
+          -->
+          <p v-if="result.currentJobKey" class="mt-0.5 break-all font-mono text-[10px] text-gray-500">
+            账本键：{{ result.currentJobKey }}
+          </p>
           <p v-if="result.domOutline" class="mt-0.5 text-gray-500">
             DOM 读到：岗位名「{{ result.domOutline.jobName || '未命中' }}」·
             公司「{{ result.domOutline.brandName || '未命中' }}」
@@ -109,7 +126,7 @@ function shortUrl(url: string): string {
           详情接口契约
         </h3>
         <div v-if="!result.detailProbe" class="text-gray-400">
-          没有可探测的岗位（尚未捕获到 securityId）
+          没有可探测的岗位（尚未捕获到岗位标识），或本站点直接从页面读取、没有接口契约可验。
         </div>
         <div
           v-else
@@ -120,14 +137,14 @@ function shortUrl(url: string): string {
         >
           <p class="flex items-center gap-1.5">
             <span class="text-sm" :class="result.detailProbe.ok ? 'i-tabler-circle-check text-teal-600' : 'i-tabler-alert-triangle text-red-500'" />
-            securityId → {{ result.detailProbe.ok ? '请求成功' : '请求失败' }}
+            岗位标识 → {{ result.detailProbe.ok ? '请求成功' : '请求失败' }}
           </p>
           <p class="flex items-center gap-1.5">
             <span
               class="text-sm"
               :class="result.detailProbe.hasPostDescription ? 'i-tabler-circle-check text-teal-600' : 'i-tabler-alert-triangle text-red-500'"
             />
-            jobInfo.postDescription → {{ result.detailProbe.hasPostDescription ? '有内容' : '为空' }}
+            详情字段 → {{ result.detailProbe.hasPostDescription ? '有内容' : '为空' }}
           </p>
           <p v-if="result.detailProbe.jdPreview" class="mt-1 text-gray-500">
             预览：{{ result.detailProbe.jdPreview }}…
@@ -173,20 +190,3 @@ function shortUrl(url: string): string {
     </template>
   </div>
 </template>
-
-<style scoped>
-.oh-btn-primary {
-  background: #0d9488;
-  border: none;
-  color: #fff;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.oh-btn-primary:hover:not(:disabled) {
-  background: #0f766e;
-}
-.oh-btn-primary:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-</style>

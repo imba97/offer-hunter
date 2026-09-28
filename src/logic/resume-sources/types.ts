@@ -9,7 +9,8 @@
  *
  * ⚠ 本文件与 registry.ts **不得引入任何运行时依赖**（尤其不能引 Vue 组件）：
  *   后台（service worker）要 import 注册表来路由消息，而组件一旦被拉进来，
- *   后台包会平白多出几 MB。自定义 UI 走 components/resume-sources 的查找表。
+ *   后台包会平白多出几 MB。来源界面由 components/ResumeSourcePanel.vue 按
+ *   **configFields 这份纯数据**渲染，因此也不需要在契约里挂组件。
  */
 
 /**
@@ -18,7 +19,6 @@
  * `'paste'` 是手动输入（没有远端可取，但走同一套接口 —— 见 paste.ts 的说明）。
  */
 export type ResumeSourceId = 'paste' | 'gist'
-
 /**
  * 配置字段类型。
  *
@@ -36,7 +36,12 @@ export interface ResumeConfigField {
   hint?: string
   /** 需要强调的风险提示，用琥珀色渲染 */
   warning?: string
-  /** 留空是否算「配置齐全」。默认 true */
+  /**
+   * 标成「可选」：字段名旁边挂一个灰色徽标。
+   *
+   * 只影响渲染，不参与校验 —— 这个扩展从不因为字段缺失而拦住用户，
+   * 配置不齐时的行为由来源自己的 `identify`（返回空串表示「先不同步」）决定。
+   */
   optional?: boolean
 }
 
@@ -82,8 +87,55 @@ export interface ResumeSourceAdapter {
    */
   createConfig: () => Record<string, unknown>
 
-  /** 设置页据此渲染表单 */
+  /**
+   * 设置页的表单声明 —— **来源界面的唯一出处**。
+   *
+   * 通用面板（components/ResumeSourcePanel.vue）按它渲染输入框、说明与「可选」标记，
+   * 因此一份普通配置（几个文本框）**不需要写任何组件**。
+   * 需要复杂交互（从列表里挑一项、可视化预览…）的来源才另写组件并挂进
+   * Options.vue 的查找表，那时也仍然可以只覆盖其中一部分。
+   *
+   * ⚠ 不要在这里写「取完之后才知道」的东西（如 Gist 的文件名）：那些属于
+   *   items（见 ResumeContent.items）与 itemField。
+   */
   configFields: ResumeConfigField[]
+
+  /**
+   * 内容在哪一边 —— 设置页据此决定「要不要显示来源面板」与「编辑器能不能改」。
+   *
+   *  - `'local'`：内容就在本地（手动输入）。编辑器可写，没有可同步的东西，
+   *    因此来源面板整块不渲染（否则会给「手动编辑」配一个没有意义的同步按钮）。
+   *  - `'remote'`：内容以远端为准。编辑器只读 —— 否则用户会改出一份既不是远端、
+   *    也不会被同步覆盖的幻觉内容；来源面板显示取数配置与同步按钮。
+   *
+   * 与站点层的 `source` 同一个用意：用一个显式判别替代散落各处的 `id === 'gist'`。
+   */
+  contentSource: 'local' | 'remote'
+
+  /**
+   * 用户输入收敛：把输入框里的文本变成**要存进配置的值**。
+   *
+   * 通用面板在输入框失焦/回车时调用它，让「人怎么写」与「系统怎么存」解耦：
+   * Gist 的链接、带 `#file-xxx` 的分享链接都会被收敛成裸 ID。
+   *
+   * 返回 `null` 表示这次输入认不出来 —— 面板会还原输入框并就地报错，
+   * **不改配置**（悄悄把用户填好的值清掉比留着旧值更糟）。
+   * 不实现这个方法表示输入原样存储。
+   *
+   * 刻意只管「一个字段 → 一个值」：跨字段的联动（例如换了取数目标就丢掉上一份的
+   * 子项选择）由通用面板按 `itemField` 统一处理，不需要每个来源自己记得。
+   */
+  normalize?: (field: string, value: string) => string | null
+
+  /**
+   * 「取完之后再选一项」写回哪个配置键（Gist 是 `fileName`）。
+   *
+   * 与 `ResumeContent.items` 配对：那里给出可选项，这里说选中项存到哪。
+   * 留空表示这个来源没有子项可选。
+   */
+  itemField?: string
+  /** 子项下拉的标题；留空时面板用通用文案 */
+  itemLabel?: string
 
   /**
    * 取内容。

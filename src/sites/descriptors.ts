@@ -24,8 +24,27 @@ export interface SiteDescriptor {
   id: string
   /** 展示用名字 */
   label: string
-  /** 用户不在此站点时，点图标跳去的地址 */
+  /** 用户不在此站点时，点图标跳去的地址；也是侧边栏「打开职位页」按钮的目标 */
   jobsPageUrl: string
+  /**
+   * 取数方式（与适配器的 `source` 同源）。
+   *
+   * manifest 生成时读它：只有 `'api'` 的站点才注入 MAIN world 脚本 ——
+   * DOM-only 的站点没有任何接口要被捕获，挂 hook 是纯侵入。
+   */
+  source: 'api' | 'dom'
+  /**
+   * 平台主色（十六进制）。侧边栏「打开职位页」按钮用它做背景，
+   * 让用户一眼分得清哪个按钮通向哪家。取自各平台自身的品牌色。
+   */
+  color: string
+  /**
+   * 主色上的文字颜色。
+   *
+   * 显式声明而不是按亮度算：品牌色有亮有暗（电鸭 #f9ba48 偏亮、BOSS #00bebd 偏深），
+   * 算法给出的对比度未必是设计上最舒服的那个，配置永远可以覆盖它。
+   */
+  textColor: string
   /** 该站点适配器声明的匹配模式（与 manifest 的 matches 同源） */
   matches: string[]
   /**

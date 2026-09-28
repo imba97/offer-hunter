@@ -23,9 +23,28 @@ export interface SiteManifestSpec {
   /**
    * 需要被动捕获的接口路径片段。MAIN world 的注入脚本据此过滤
    * 页面的 fetch / XHR —— 只捕获这些路径，别的响应连 clone 都不做。
+   *
+   * `source: 'dom'` 的站点这里必然是空数组（见下面的不变量）。
    */
   watchedApiPaths: string[]
 }
+
+/**
+ * 站点的取数方式。**这是构建期与运行期共用的唯一判别**：
+ *
+ *  - `'api'`：岗位数据来自页面自己调用的接口，由 MAIN world 注入脚本被动捕获。
+ *    有接口的站点必须实现 `viewFromApiPayload` / `isDetailApiUrl` / `fetchView`
+ *    / `probeDetail` 四个方法（类型上由 ApiJobSiteAdapter 强制）。
+ *    ⚠ 隐含一条架构硬约束：这类接口（如 BOSS 的 /wapi/）只认浏览器会话 Cookie，
+ *      而 MV3 的 service worker 发起的请求**不带**页面 Cookie —— 因此这些调用只能
+ *      在页面上下文（内容脚本）里发起，侧边栏必须经后台转发给它。
+ *  - `'dom'`：站点没有可用的接口（或接口对非浏览器请求返回验证页，如电鸭社区），
+ *    岗位数据只从页面 DOM 读。
+ *
+ * 为什么要有这个字段而不是「反正都给每个站点注入一份注入脚本」：给 DOM 站点挂
+ * fetch / XHR 包装对宿主页面是**零收益的侵入**（manifest 也据此少一条 content_script）。
+ */
+export type JobSiteSource = 'api' | 'dom'
 
 /** 诊断面板要复验的一项：选择器还命中吗 */
 export interface SiteSelectorProbe {
@@ -43,12 +62,19 @@ export interface SiteDiagnostic {
   jdLength: number
 }
 
-export interface JobSiteAdapter {
+/**
+ * 站点适配器的公共部分。
+ *
+ * 不在契约里的字段一律视为站点私有（如 BOSS 的 securityId / encryptJobId）：
+ * 它们该留在 `JobView.site.ids` 里，而不是上升到通用模型。
+ */
+interface JobSiteAdapterBase {
   id: SiteId
   /** 展示用名字（诊断、提示文案里出现） */
   label: string
   /** 用户不在这个站点时，提示他去哪；也是点图标时的跳转目标 */
   jobsPageUrl: string
+  source: JobSiteSource
   manifest: SiteManifestSpec
 
   /**
@@ -59,28 +85,8 @@ export interface JobSiteAdapter {
    */
   matchUrl: (url: string | undefined) => boolean
 
-  /**
-   * 本站点的请求要不要带页面 Cookie。
-   *
-   * ⚠ 这是决定转发架构的硬约束：BOSS 的 /wapi/ 只认浏览器会话 Cookie，
-   * 而 MV3 的 service worker 发起的请求**不带**页面 Cookie，所以那些调用只能在
-   * 内容脚本里发起，侧边栏必须经后台转发给内容脚本。
-   * 不需要 Cookie 的站点可以让后台直连，省掉一整趟往返 —— 所以这项必须显式声明，
-   * 不能靠「反正都转发」蒙过去。
-   */
-  needsPageCookie: boolean
-
-  /** 页面地址 → 岗位标识（BOSS 用 URL 上的 securityId） */
+  /** 页面地址 → 岗位标识（BOSS 用 URL 上的 securityId，电鸭用 /posts/<slug> 的 slug） */
   naturalKeyFromUrl: (url: string) => string
-
-  /** 从接口响应体构造岗位视图；拿不到就返回 null（交给 DOM 兜底） */
-  viewFromApiPayload: (zpData: unknown, naturalKey: string) => JobView | null
-  /** 判断一个捕获到的响应体是不是「岗位详情」 */
-  isDetailApiUrl: (url: string) => boolean
-  /** 主动拉一个岗位的完整视图（内容脚本持有 Cookie，这条只能它来发） */
-  fetchView: (naturalKey: string) => Promise<JobView | null>
-  /** 详情接口探针：验证「标识 → JD」这条契约是否仍然成立 */
-  probeDetail: (naturalKey: string) => Promise<{ hasDescription: boolean, preview: string }>
 
   /** 读当前详情面板里的 JD 全文（页面水印清洗在这里做） */
   readJd: () => string | null
@@ -89,6 +95,10 @@ export interface JobSiteAdapter {
    *
    * 单独暴露是为了让轮询能先做一个**廉价**判断：读 `textContent.length` 比
    * readJd（克隆 + 逐元素取计算样式）便宜得多，绝大多数轮询会在这里被挡掉。
+   *
+   * ⚠ 「这一页是不是招聘帖」的判定写在 readJd / readOutline 里，**不要**写在这里：
+   *   观察器需要一个稳定的容器才能挂上，判定放进容器选择器会让非招聘页陷入
+   *   500ms 的挂载重试循环。
    */
   jdProbeElement: () => HTMLElement | null
   /**
@@ -120,6 +130,38 @@ export interface JobSiteAdapter {
   /** 页面改版时复验用：选择器命中情况 + 兜底读取结果 */
   diagnose: () => SiteDiagnostic
 }
+
+/**
+ * 有接口的站点。
+ *
+ * 四个接口方法在这里是**必填**（而不是可选后到处判空）：类型系统替运行期守住
+ * 「声明了 source: 'api' 就必须真的会翻译接口响应」这条不变量。
+ */
+export interface ApiJobSiteAdapter extends JobSiteAdapterBase {
+  source: 'api'
+
+  /**
+   * 从捕获到的**响应体原文**构造岗位视图；拿不到就返回 null（交给 DOM 兜底）。
+   *
+   * ⚠ 参数是响应体原文而不是「解包后的业务对象」：各家信封不同（BOSS 是
+   *   `{ code, zpData }`，别家是 `{ data }` 或裸对象），解包是站点私有知识，
+   *   不该由通用内容脚本代劳。这也正是这里把 `zpData` 改名为 `payload` 的原因。
+   */
+  viewFromApiPayload: (payload: unknown, naturalKey: string) => JobView | null
+  /** 判断一个捕获到的响应体是不是「岗位详情」 */
+  isDetailApiUrl: (url: string) => boolean
+  /** 主动拉一个岗位的完整视图（内容脚本持有 Cookie，这条只能它来发） */
+  fetchView: (naturalKey: string) => Promise<JobView | null>
+  /** 详情接口探针：验证「标识 → JD」这条契约是否仍然成立 */
+  probeDetail: (naturalKey: string) => Promise<{ hasDescription: boolean, preview: string }>
+}
+
+/** 只读 DOM 的站点：没有任何接口，因此也不需要上面那四个方法 */
+export interface DomJobSiteAdapter extends JobSiteAdapterBase {
+  source: 'dom'
+}
+
+export type JobSiteAdapter = ApiJobSiteAdapter | DomJobSiteAdapter
 
 /** 便于各站点适配器标注自己的返回类型 */
 export type { JobView, SiteId, SiteRef } from '~/logic/types'

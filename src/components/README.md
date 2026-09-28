@@ -158,9 +158,33 @@ padding 就这么丢过一次，见上）。
 两个已踩过的坑，改这个组件时别踩回去：
 
 1. `$attrs` 必须绑到内层 input（`inheritAttrs: false`）。绑在根 `div` 上时 `@blur` 会静默失效
-   —— blur 不冒泡，而 GistPicker 的「失焦才提交」正靠它。
+   —— blur 不冒泡，而来源面板的「失焦才提交」正靠它。
 2. 因此**不要**在组件里声明 `placeholder` 之类的 prop：声明了它就从 `$attrs` 里消失，
    而组件又没往 input 上绑，占位符会静默不见（这个是加组件时真实发生的）。
 3. 眼睛上带 `@mousedown.prevent`：点它时不让焦点离开输入框，否则会先触发一次失焦提交。
 4. 若某个面板里还有别的按钮，测试别再用 `wrapper.get('button')` 抓第一个按钮
    —— 它现在是小眼睛（`button.oh-secret-eye`）；同步按钮请用 `button.oh-btn-primary`。
+
+### ResumeSourcePanel
+
+`ResumeSourcePanel.vue` —— 简历来源的通用配置面板。**新增一个简历来源不需要写界面**：
+输入框、说明、风险提示、「可选」徽标、子项下拉、同步按钮与状态条全部由适配器声明的
+数据渲染（`configFields` / `normalize` / `itemField` / `itemLabel`）。
+
+```vue
+<ResumeSourcePanel
+  :adapter="activeSource"
+  :config="activeConfig"
+  :synced-at="resume.syncedAt"
+  :synced-key="resume.syncedKey"
+  @update:config="updateSourceConfig"
+  @synced="onSourceSynced"
+/>
+```
+
+它只对 `contentSource === 'remote'` 的来源渲染（内容在本地的手动输入没有可同步的东西）。
+两条容易踩的行为，改它之前先看一眼：
+
+- **失焦/回车才提交**（不是边打边发请求）：输入框的值存在组件内部的 draft 里，
+  与配置分开；正在编辑的字段会被标记为 dirty，**期间配置的回写不会冲掉它**。
+- **改了主字段就清掉子项选择**：子项属于上一份内容，沿用会取错东西。
