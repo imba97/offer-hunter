@@ -1,206 +1,193 @@
 # Offer Hunter
 
-> 在 BOSS 直聘上用 AI 分析「你的简历 ↔ 岗位 JD」的匹配度，并按你的规则生成定制打招呼语。
-> **扩展不代发消息**：招呼语只复制到剪贴板，发送始终由你本人完成。
+English | [简体中文](./README_CN.md)
 
-浏览器扩展（Chrome / Edge / Firefox），基于 [Vite](https://vitejs.dev/) + Vue 3 + TypeScript 构建。
+[![Release](https://img.shields.io/github/v/release/imba97/offer-hunter)](https://github.com/imba97/offer-hunter/releases)
+[![License](https://img.shields.io/github/license/imba97/offer-hunter)](./LICENSE)
+[![Manifest V3](https://img.shields.io/badge/manifest-v3-4b8bbe)](https://developer.chrome.com/docs/extensions/develop/migrate/what-is-mv3)
+[![Browsers](https://img.shields.io/badge/browsers-Chrome%20%7C%20Edge%20%7C%20Firefox-4b8bbe)](#install)
+[![Outreach](https://img.shields.io/badge/outreach-sent%20by%20you%20only-149e9b)](#design-boundaries)
 
-## 它做什么
+<p align="center">
+  <img src="./extension/assets/icon-128.png" alt="Offer Hunter" width="128">
+</p>
 
-1. **读取你的简历** —— 在设置页维护简历全文（Markdown）。
-2. **抓取 JD** —— 你在 BOSS 职位页点开哪个岗位，扩展就读取那个岗位的描述与招聘者信息。
-3. **AI 匹配度分析** —— 用你配置的 AI 平台对比简历与 JD，输出 0–100 的匹配度、命中点与缺失技能。
-4. **生成打招呼语** —— 结合简历、JD 与匹配结论生成开场消息；你复制后自己粘贴发送。
+> A browser extension that scores how well your resume matches a job posting on BOSS Zhipin, then drafts a tailored opener for you. The extension never sends it — you copy, you paste, you click send.
 
+Offer Hunter lives in the browser's side panel, right next to the job you are already reading. It reads the full job description from the page, sends it together with your resume to an AI platform you control, and comes back with a 0–100 match score, the points that hit, and the skills you are missing. When the score clears your threshold, it writes a short opening message grounded in your real experience instead of generic pleasantries.
+
+It exists because applying well takes more time than applying fast. Reading a posting carefully, judging honestly whether you fit, and writing an opener that doesn't sound copy-pasted is exactly the work that gets skipped when you are 40 applications in. Offer Hunter does the reading and the drafting; the judgement about whether to actually reach out stays with you.
+
+## Features
+
+- 🎯 **AI match scoring** — your resume against the JD, scored 0–100 with the hits and the gaps.
+- ✍️ **Tailored openers** — an opening message drawn from your real experience, with your own rules taking priority.
+- 📋 **Copy, never send** — the opener goes to your clipboard; sending stays your click.
+- 🔌 **Your AI, your choice** — DeepSeek, OpenAI, Anthropic, Kimi, or a local model that keeps your resume on your machine.
+- 🧾 **Local job ledger** — jobs you already handled are recorded, so nothing is analysed or greeted twice.
+- 🧭 **Out of the page's way** — the UI lives in the browser's side panel and injects nothing into the BOSS page.
+
+## How it works
+
+```text
+resume (Markdown) ──┐
+job JD (captured) ──┴──> AI match score
+                            ├──> below threshold ──> skipped, move on
+                            └──> at/above threshold ──> opener ──> copy, you send
 ```
-简历 ──┐
-       ├──► AI 匹配度评分 ──► 低于阈值？ ──► 放弃或继续看下一个岗位
-JD  ───┘                └──► 达到阈值 ──► 生成定制打招呼语 ──► 复制，你自己发送
+
+1. **You keep one resume as Markdown.** It is written and stored locally in the extension's options page.
+2. **You open a job on BOSS.** The extension captures that one posting — never the list, never a queue, never anything you did not click.
+3. **You ask for a match analysis.** The request goes through the background service worker to your AI platform, with the resume and the JD together.
+4. **You get a number and a reason.** Score, verdict, hit points and missing skills land in the side panel, and the result is written to the local ledger.
+5. **If the score clears your threshold, you generate an opener.** You copy it and paste it into the chat yourself.
+
+## Install
+
+Offer Hunter reads your resume and sends it to a third-party AI endpoint, so it is worth installing from a build you can inspect. Both options below are exactly that.
+
+### Option 1 — Build from source
+
+```bash
+pnpm install
+pnpm build
 ```
 
-岗位会被记进本地「账本」（以 securityId 为键），避免同一个岗位被反复分析。
+Then open your browser's extension page, turn on developer mode, and load the `extension/` directory as an unpacked extension.
 
-## 当前进度
+- Chrome / Edge: `chrome://extensions` → enable **Developer mode** → **Load unpacked** → pick `extension/`
+- Firefox: `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on** → pick `extension/manifest.json`
 
-- [x] 项目脚手架（Vite + Vue 3 + TS + UnoCSS + 多入口扩展）
-- [x] 品牌、图标与 Manifest（仅申请 BOSS 直聘域名权限）
-- [x] 接口捕获（MAIN world 注入脚本 hook 页面 fetch/XHR）
-- [x] 岗位详情抓取与 AI 匹配度评分
-- [x] 招呼语生成 + 一键复制（不代填、不代发）
-- [x] 浏览器原生侧边栏（岗位详情 / 诊断 / 快捷设置）与设置页
-- [x] 简历编辑器（Monaco + Shiki 高亮，按需加载）
-- [ ] 简历导入（PDF / GitHub Gist）
-- [ ] 投递记录与统计面板
-- [ ] 平台自带去重标（haveChatted / isFriend）接入筛选
+### Option 2 — Prebuilt release
 
-## 隐私与安全
+Every [GitHub Release](https://github.com/imba97/offer-hunter/releases) carries two artifacts built by CI:
 
-这是本扩展最重要的边界，请在使用前读一遍：
+- `extension.zip` — unzip it and load the folder as an unpacked extension in Chrome or Edge
+- `extension.xpi` — the Firefox build. It is unsigned, so Firefox Release will refuse it; use Firefox Developer Edition or Nightly, or load it as a temporary add-on via `about:debugging`
 
-- **简历会发给第三方 AI**：匹配分析会把简历全文与 JD 一起发送到你配置的 AI 平台。
-  若简历含手机号、身份证号等敏感信息，建议先脱敏。
-- **API Key 存在 `chrome.storage.local`，且未加密**：能读取本机浏览器数据的人即可拿到。
-  建议使用设了额度上限的 Key，而不是主账号的全权 Key。
-- **数据只在本机**：扩展没有自建服务端，除你配置的 AI 平台外不向任何第三方发送数据。
-- **随时可清空**：设置页 →「AI 平台」→「清空本地数据」会删除简历、API Key、
-  平台配置与岗位账本；也可以直接卸载扩展。
-- **不代发消息、不碰登录凭据、不逆向签名、不绕过平台频率限制**。
-  招呼语生成后由你自己粘贴发送，扩展不点击任何按钮。
+There is no store link in this repository yet, so use one of the options above.
 
-## 技术要点
+### Compatibility
 
-### 编辑器
+- **Chrome / Edge 111+** — 111 is the floor for `world: "MAIN"` content scripts; the click-the-icon-to-open-the-panel behaviour needs 116+, and degrades to opening the panel from the browser's own side panel button
+- **Firefox 128+** — for MAIN-world content scripts and the MV3 sidebar
+- **Node.js 20+ and pnpm 11** — only to build from source
 
-设置页的简历编辑器是 **Monaco + Shiki**，按 [Shiki 官方 Monaco 集成](https://shiki.style/packages/monaco) 实现：
+## Usage
 
-- `monaco-editor-core` + `@shikijs/monaco` 的 `shikiToMonaco()`
-- 语法与主题用**细粒度 bundle** 显式引入（`shiki/core` + `createHighlighterCore`），
-  避免 `shiki` 全量入口把所有语言主题都打进产物
-- 用 JavaScript 正则引擎而非 Oniguruma WASM，省掉 wasm 资源与 CSP 问题
-- **完全本地打包，不引用任何 CDN**：MV3 的 `script-src 'self'` 不可放宽，
-  远程托管代码会被商店审核拒绝，也无法离线工作
-- **按需加载**：编辑器体积约 4 MB，静态 import 会让整个设置页首屏都背上它，
-  因此用 `defineAsyncComponent` 懒加载
+1. **Configure an AI platform.** Open the options page, pick a provider, paste an API key, and press **Test connection**. The test reports the resolved provider, model and latency, so a wrong base URL, key or model name is caught here rather than in the middle of a job search.
+2. **Paste your resume.** The options page has a Markdown editor with syntax highlighting and undo history. Content saves as you type; length and last-updated time are shown next to it.
+3. **Set your threshold and your rules.** The threshold decides when an opener is suggested. The greeting rules box is free-form — anything you put there is appended to the generation prompt with the highest priority.
+4. **Browse jobs normally.** Click any posting on the BOSS jobs page, open the side panel, and the job appears there. Then:
 
-### 为什么薪资只能从接口读
+   - **Match analysis** — score the job against your resume
+   - **Generate opener** — available whether or not you analysed first; the match result just makes it sharper
+   - **Copy** — puts the message on your clipboard for you to paste
 
-BOSS 直聘用自定义字体渲染薪资数字，DOM 的 `textContent` 返回的是 Unicode
-私用区字符（U+E000–U+F8FF）而非数字。因此薪资必须以接口的 `salaryDesc` 为准，
-DOM 仅作为拿不到接口数据时的 JD 兜底。
+The side panel also has a **Diagnostics** tab for verifying that page capture still works, and a **Settings** tab for the two things you reach for mid-session: the threshold and a connection test.
 
-### 注入脚本
+## Supported AI platforms
 
-`/wapi/` 接口只认浏览器会话 Cookie，而 MV3 的 service worker 发起的请求不带页面
-Cookie，因此**接口调用只能在页面上下文发起**。扩展通过一个 `world: "MAIN"` 的
-注入脚本 hook 页面的 `fetch`/`XMLHttpRequest` 被动捕获响应，零额外请求；
-它在 `document_start` 就装好 hook，并把最近一次详情响应缓存下来，
-等隔离世界的内容脚本（`document_idle`）主动来取 —— 否则直链打开岗位页时会漏掉首屏请求。
+| Platform | Protocol | Structured output | Notes |
+| --- | --- | --- | --- |
+| DeepSeek | OpenAI-compatible | JSON object | Good Chinese output at a low price. Thinking mode is turned off by default so short answers come back directly |
+| OpenAI | OpenAI | JSON schema | The strictest structured-output support, so the most reliable parsing |
+| Anthropic | Anthropic Messages | Tool use | Strong on long context and instruction following |
+| Kimi | Anthropic-compatible | Prompted JSON | Moonshot's endpoint, authenticated with a bearer token |
+| Custom | OpenAI-compatible | Prompted JSON | Relays, self-hosted gateways, and local models — the option where your resume never leaves your machine |
 
-### JD 清洗
+Base URL, model and max output tokens are overridable on every preset, and there is a one-click connection test. A local endpoint such as Ollama or LM Studio is a first-class choice here, not an afterthought: it is the only configuration in which neither your resume nor the job description is sent to a third party.
 
-BOSS 会在岗位描述里注入反爬水印：`<style>` 标签与一批 `visibility:hidden` /
-`font-size:0` 的隐藏元素。清洗时**必须在真实节点上判断可见性** ——
-克隆出来的子树已脱离文档，作者样式表的选择器匹配不到它，
-`getComputedStyle` 拿不到 `display:none`，水印文字就会混进 JD 并一起发给 AI。
+## Privacy and security
 
-### 设计边界
+This is the most important boundary of the project, so please read it before installing.
 
-- **不代点发送**：招呼语只复制到剪贴板，发送始终由用户本人点击
-- **不碰登录凭据**：登录态只由用户在浏览器里维护，扩展不代填验证码
-- **不逆向签名、不绕过平台频率限制**
+- **Your resume is sent to a third-party AI.** Match analysis and opener generation both send the resume together with the JD to the endpoint you configured. If your resume contains a phone number, ID number or similar, redact it first.
+- **The API key is stored unencrypted in `chrome.storage.local`.** Anyone who can read the browser profile on this machine can read it. Use a key with a spending cap rather than your main account's key.
+- **Data stays on your machine.** There is no backend service. Apart from the AI endpoint you configured, nothing is sent anywhere.
+- **Narrow permissions.** Host access is limited to `zhipin.com`, so the extension cannot read any other site you visit.
+- **You can clear everything.** Options page → AI platforms → clear local data removes the resume, API key, platform settings and the job ledger. Uninstalling the extension does the same.
+- **Requests are made by the extension's own background worker,** so the API key never enters a web page's context.
 
-## 开发
+## Design boundaries
 
-> 需要 [pnpm](https://pnpm.io/)（未安装可执行 `npm i -g pnpm`）
+These are deliberate constraints, not a backlog:
+
+- **No sending on your behalf.** The opener is copied to the clipboard and the send button stays yours. The extension clicks nothing on the page.
+- **No credentials.** Sign-in state lives only in your browser; the extension never fills or reads verification codes.
+- **No signature reversing and no rate-limit circumvention.**
+- **No bulk collection.** Only the posting you clicked is read. There is no crawler, no queue and no background scraping of listings.
+
+## Implementation notes
+
+A few problems in this project had non-obvious answers, and they shape the architecture.
+
+### Capturing job data from the page
+
+The `/wapi/` endpoints authenticate with the browser session cookie, and a Manifest V3 service worker's requests do not carry page cookies — so those calls can only be made from the page's own context. The extension therefore hooks `fetch` and `XMLHttpRequest` from a `world: "MAIN"` content script and passively captures responses, adding zero extra requests. It installs the hook at `document_start` and caches the most recent detail response, which an isolated-world content script then picks up at `document_idle`; without that handshake, opening a job by direct link would miss the first-screen request entirely.
+
+### Why salary has to come from the API
+
+BOSS renders salary figures with a custom font, so the DOM's `textContent` returns private-use-area characters (U+E000–U+F8FF) rather than digits. Salary is therefore taken from the API's `salaryDesc` field, with the DOM used only as a last-resort fallback for the JD itself.
+
+### Cleaning the anti-scraping watermark out of the JD
+
+Job descriptions contain an injected watermark: a `<style>` tag plus a set of `visibility: hidden` and `font-size: 0` elements. Visibility must be checked on the **real** nodes — a cloned subtree is detached from the document, author stylesheet selectors no longer match it, `getComputedStyle` reports nothing useful, and the watermark text would sail straight through to the AI.
+
+### Keeping the editor out of the critical path
+
+The resume editor is Monaco plus Shiki, bundled entirely locally: Manifest V3's `script-src 'self'` cannot be relaxed, remotely hosted code is rejected by store review, and it would not work offline anyway. Syntaxes and themes are pulled in through fine-grained Shiki entries using the JavaScript regex engine rather than the Oniguruma WASM build. Because the editor is around 4 MB, it is loaded with `defineAsyncComponent` — otherwise changing an API key would mean downloading the editor first.
+
+## Development
+
+Requires Node.js 20+ and [pnpm](https://pnpm.io/).
 
 ```bash
 pnpm install
 pnpm dev
 ```
 
-然后打开浏览器扩展管理页，**加载已解压的扩展程序，选择 `extension/` 目录**。
+Then load `extension/` as an unpacked extension in your browser. For Firefox development, use `pnpm dev-firefox` instead.
 
-Firefox 开发者可改用：
+### Commands
 
-```bash
-pnpm dev-firefox
-```
+| Command | What it does |
+| --- | --- |
+| `pnpm dev` | Development build with HMR, Chrome manifest |
+| `pnpm dev-firefox` | Development build with HMR, Firefox manifest |
+| `pnpm build` | Production build into `extension/` |
+| `pnpm pack` | Chrome: `extension.zip` and `extension.crx` |
+| `pnpm pack:firefox` | Firefox: rebuild with the Firefox manifest and pack `extension.xpi` |
+| `pnpm lint` | ESLint |
+| `pnpm typecheck` | `tsc --noEmit` |
+| `pnpm test` | Unit tests (Vitest) |
+| `pnpm test:e2e` | End-to-end smoke tests (Playwright) |
+| `pnpm release` | Version bump, commit, tag and push |
 
-`web-ext` 会在 `extension/` 文件变化时自动重载扩展。Vite 已处理大部分 HMR，仍推荐安装 [Extensions Reloader](https://chromewebstore.google.com/detail/extensions-reloader/fimgfedafeadlieiabdeeaodndnlbhid) 以便更干净地硬重载。
+Use `pnpm pack:firefox` rather than `pnpm pack:xpi` for Firefox: the Chrome and Firefox manifests differ (`side_panel` vs `sidebar_action`), so the Firefox artifact has to be rebuilt first.
 
-### 构建与打包
+## Roadmap
 
-```bash
-pnpm build          # 产物输出到 extension/
-pnpm pack           # Chrome：extension.zip + extension.crx
-pnpm pack:firefox   # Firefox：用 Firefox 清单重新构建并打包 extension.xpi
-```
+- Resume import from PDF and from a GitHub Gist
+- An application tracking and statistics panel
+- Using the platform's own dedupe flags (`haveChatted`, `isFriend`) in filtering
 
-⚠ 两点注意：
+## Contributing
 
-- `pack:xpi` 打的是**当前 `extension/manifest.json`**。Chrome 与 Firefox 的清单不同
-  （`side_panel` vs `sidebar_action`），所以 Firefox 包必须走 `pnpm pack:firefox`
-  （它会带上 `EXTENSION=firefox` 重新构建），否则打出来的 `.xpi` 装不上。
-- `crx pack` 会用到仓库根目录的 `key.pem`（首次运行自动生成，已被 `.gitignore` 忽略）。
-  **扩展 ID 由它决定，请务必备份**：换一把钥匙 = 换一个扩展 ID，用户数据与商店身份都会断掉。
-
-### 其他命令
-
-```bash
-pnpm lint           # ESLint
-pnpm typecheck      # tsc --noEmit
-pnpm test           # 单元测试（Vitest）
-pnpm test:coverage  # 单元测试 + 覆盖率（产物在 .coverage/）
-pnpm test:e2e       # 端到端测试（Playwright，首次需 npx playwright install chromium）
-```
-
-> e2e 必须用 Playwright 自带的 Chromium：Chrome 137+ 已不再接受 `--load-extension`，
-> 系统的 Chrome 装不上未打包扩展。
-
-### 发布
+Questions, bug reports and pull requests are all welcome — please use the [issue tracker](https://github.com/imba97/offer-hunter/issues) for the first two. Before opening a pull request, make sure the following pass:
 
 ```bash
-pnpm release   # bumpp：选版本 → 改 package.json → commit → 打 vX.Y.Z tag → push
+pnpm lint
+pnpm typecheck
+pnpm test
 ```
 
-`pnpm release` 只做「改版本号 + 打 tag + 推 tag」这一件事，剩下的都交给
-`.github/workflows/release.yaml`：
+Commit messages follow Conventional Commits so the release changelog stays meaningful. Changes to BOSS's page structure should be confined to `src/logic/boss/selectors.ts`, which exists precisely to keep that fragility in one place.
 
-```
-pnpm release
-  └─ push tag vX.Y.Z
-       └─ GitHub Actions: release
-            ├─ pnpm install --frozen-lockfile
-            ├─ pnpm build                （必须先构建，见 workflow 内注释）
-            ├─ pnpm test:coverage
-            ├─ pnpm pack:zip             → extension.zip（Chrome）
-            ├─ pnpm pack:firefox         → extension.xpi（Firefox）
-            ├─ changelogithub            → 生成 changelog 并创建 GitHub Release
-            ├─ gh release upload         → 把 zip / xpi 挂到 Release
-            └─ chrome-webstore-upload    → 上传 + 发布（未配 CHROME_* secrets 时自动跳过）
-```
+## Acknowledgments
 
-⚠ 三点注意：
+The project started from [vitesse-webext](https://github.com/antfu-collective/vitesse-webext), a Vite + Vue WebExtension starter, and inherits its multi-entry build setup, HMR wiring and Manifest V3 scaffolding from it.
 
-- **commit message 必须是 conventional commits**（`feat:` / `fix:` / `chore:` …），
-  changelogithub 靠它生成 release notes，写别的就分不出条目。
-- **CI 完全不碰 `key.pem`**：上架走的是 zip，扩展 ID 由 Chrome Web Store 生成，
-  发布链路里没有 `key.pem` 的位置。仓库里那个 `key.pem` 只影响本地
-  `pnpm pack:crx` 打出来的 `.crx`（它的 ID 和商店版不是同一个），
-  只有你自己分发 `.crx` 时才需要在乎它。
-- **首次上架必须在 Chrome Web Store 后台手动完成**，API 只接受后续更新。
-
-## 目录结构
-
-- `src/` —— 主要源码
-  - `background/` —— 后台 service worker（AI 调用、账本、转发）
-  - `contentScripts/` —— 内容脚本，只做「与页面打交道」的事，没有任何界面
-    - `injected/` —— MAIN world 注入脚本（hook 页面 fetch/XHR）
-  - `sidepanel/` —— 侧边栏（岗位 / 诊断 / 快捷设置）
-  - `options/` —— 设置页（简历、打招呼规则、AI 平台）
-  - `components/` —— 共享 Vue 组件（如 Markdown 编辑器）
-  - `logic/` —— 领域模型、存储、BOSS 接口与 DOM 读取
-  - `platform/ai/` —— AI 三层结构（protocol → platform → factory）
-  - `manifest.ts` —— 动态生成的 `manifest.json`，带完整类型支持
-- `extension/` —— 扩展打包根目录
-  - `assets/` —— 静态资源（图标等）
-  - `dist/` —— 构建产物（开发时为 Vite 的 stub 入口）
-- `scripts/` —— 开发与打包辅助脚本
-- `e2e/` —— Playwright 冒烟测试
-
-## 图标
-
-`extension/assets/` 下的 `icon.svg` 为矢量稿，`icon-16/32/48/128/512.png` 由设计稿导出，`src/assets/logo.png` 供界面使用。更换图标时请同步替换这几处。
-
-## 技术栈
-
-- **Vue 3** —— Composition API + `<script setup>`
-- **Vite** —— 开发态 HMR，多入口构建
-- **TypeScript** —— 全量类型
-- **UnoCSS** —— 原子化 CSS
-- **webext-bridge** —— 各上下文间的类型安全通信
-- **webextension-polyfill** —— 跨浏览器 WebExtension API
-
-## 许可
+## License
 
 [MIT](./LICENSE)
