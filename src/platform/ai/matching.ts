@@ -1,4 +1,4 @@
-import type { AiSettings, JobSummary, MatchResult, Resume } from '~/logic/types'
+import type { AiSettings, JobCore, MatchResult, Resume } from '~/logic/types'
 import type { AiProvider } from '~/platform/ai/platforms'
 import type { PingResult } from '~/platform/ai/types'
 import { createAiProvider } from '~/platform/ai/platforms'
@@ -190,6 +190,53 @@ export function buildMatchSystem(userPrompt: string): string {
   return withUserPrompt(MATCH_SYSTEM, userPrompt)
 }
 
+/**
+ * 把岗位信息拼成一段给模型看的文字。
+ *
+ * 只读 JobCore 的通用字段 —— 站点私有字段（BOSS 的 securityId / encryptJobId /
+ * bossOnline）刻意不进来：它们对判断匹配度毫无帮助，反而会把站点细节泄漏进提示词。
+ * 这也是「加第二个招聘网站时本文件不用改」的原因。
+ */
+function describeJob(job: JobCore, opts: { withRecruiter: boolean }): string {
+  return [
+    `职位：${job.title}`,
+    `公司：${job.company ?? ''}${formatCompanySuffix(job)}`,
+    `薪资：${job.salary ?? ''}`,
+    `经验要求：${job.experience ?? ''}`,
+    `学历要求：${job.degree ?? ''}`,
+    `地点：${formatLocation(job)}`,
+    job.skills?.length ? `技能标签：${job.skills.join('、')}` : '',
+    opts.withRecruiter && job.recruiter
+      ? `招聘者：${job.recruiter.name}${job.recruiter.title ? `（${job.recruiter.title}）` : ''}`
+      : '',
+  ].filter(Boolean).join('\n')
+}
+
+/**
+ * 供提示词使用的岗位描述文本。
+ *
+ * 导出仅为单测：它是「通用模型 → 提示词」的唯一出口，站点私有字段一旦从这里
+ * 漏进提示词（例如又把 securityId 拼进去），加第二个站点时就会暴露不一致。
+ */
+export function buildPromptJobText(job: JobCore, opts: { withRecruiter?: boolean } = {}): string {
+  return describeJob(job, { withRecruiter: Boolean(opts.withRecruiter) })
+}
+
+/** 公司后缀（行业 / 规模 / 融资阶段），有才拼 */
+function formatCompanySuffix(job: JobCore): string {
+  const parts = [job.companyIndustry, job.companyScale].filter(Boolean)
+  return parts.length > 0 ? `（${parts.join(' / ')}）` : ''
+}
+
+/** 地点：城市 · 区 · 商圈，逐级拼 */
+function formatLocation(job: JobCore): string {
+  const loc = job.location
+  if (!loc)
+    return ''
+  return [loc.city, loc.district].filter(Boolean).join('')
+    + (loc.businessDistrict ? ` · ${loc.businessDistrict}` : '')
+}
+
 export interface PromptOptions {
   /** 用户自定义提示词；留空（或只有空白）表示只按内置要求 */
   userPrompt?: string
@@ -198,7 +245,7 @@ export interface PromptOptions {
 export async function matchJob(
   settings: AiSettings,
   resume: Resume,
-  job: JobSummary,
+  job: JobCore,
   jdText: string,
   opts: PromptOptions = {},
 ): Promise<MatchResult> {
@@ -214,13 +261,7 @@ export async function matchJob(
     input.resume,
     '',
     '## 目标岗位',
-    `职位：${job.jobName}`,
-    `公司：${job.brandName}（${job.brandIndustry} / ${job.brandScaleName}）`,
-    `薪资：${job.salaryDesc}`,
-    `经验要求：${job.jobExperience}`,
-    `学历要求：${job.jobDegree}`,
-    `地点：${job.cityName}${job.areaDistrict ? ` · ${job.areaDistrict}` : ''}`,
-    job.skills.length > 0 ? `技能标签：${job.skills.join('、')}` : '',
+    describeJob(job, { withRecruiter: false }),
     '',
     '## 岗位描述（JD）',
     input.jd,
@@ -296,7 +337,7 @@ export function buildGreetingSystem(userPrompt: string): string {
 export async function generateGreeting(
   settings: AiSettings,
   resume: Resume,
-  job: JobSummary,
+  job: JobCore,
   jdText: string,
   match: MatchResult | null,
   opts: PromptOptions = {},
@@ -309,11 +350,8 @@ export async function generateGreeting(
     input.resume,
     '',
     '## 目标岗位',
-    `职位：${job.jobName}`,
-    `公司：${job.brandName}`,
-    `招聘者：${job.bossName}${job.bossTitle ? `（${job.bossTitle}）` : ''}`,
-    `薪资：${job.salaryDesc}`,
-    job.skills.length > 0 ? `技能标签：${job.skills.join('、')}` : '',
+    // 招呼语是写给招聘者看的，所以这一路要带上招聘者称呼
+    describeJob(job, { withRecruiter: true }),
     '',
     '## 岗位描述（JD）',
     input.jd,

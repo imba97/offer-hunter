@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { EMPTY_JOB_NAME } from '~/logic/types'
-import { buildDomFallbackJob, readJobOutlineFromDom } from '../dom'
+import { buildDomFallbackJob, EMPTY_JOB_NAME, readJobOutlineFromDom } from '../dom'
 
 /**
  * DOM 兜底岗位的单测。
@@ -66,41 +65,65 @@ describe('buildDomFallbackJob', () => {
   it('没有已有数据时用 DOM 读到的名字，来源标为 dom', () => {
     const job = buildDomFallbackJob('JD 正文', null, outline)
 
-    expect(job.jobName).toBe('高级后端工程师')
-    expect(job.brandName).toBe('某某科技')
+    expect(job.job.title).toBe('高级后端工程师')
+    expect(job.job.company).toBe('某某科技')
     expect(job.jdText).toBe('JD 正文')
     expect(job.source).toBe('dom')
     expect(job.capturedAt).not.toBe('')
   })
 
   it('dom 里也没读到名字时退回占位标题', () => {
-    const job = buildDomFallbackJob('JD 正文', { securityId: 'sid-1' }, { jobName: '', brandName: '' })
+    const job = buildDomFallbackJob(
+      'JD 正文',
+      { site: { siteId: 'boss', naturalKey: 'sid-1' } },
+      { jobName: '', brandName: '' },
+    )
 
-    expect(job.jobName).toBe(EMPTY_JOB_NAME)
-    expect(job.brandName).toBe('')
-    expect(job.securityId).toBe('sid-1')
+    expect(job.job.title).toBe(EMPTY_JOB_NAME)
+    expect(job.job.company).toBeUndefined()
+    expect(job.site.naturalKey).toBe('sid-1')
   })
 
   it('已有的接口数据优先于 DOM 新读到的值', () => {
     const job = buildDomFallbackJob(
       '展开后的完整 JD',
-      { securityId: 'sid-1', jobName: '接口岗位名', brandName: '接口公司名', salaryDesc: '25-40K' } as any,
+      {
+        job: { title: '接口岗位名', company: '接口公司名', salary: '25-40K' },
+        site: { siteId: 'boss', naturalKey: 'sid-1' },
+      },
       outline,
     )
 
-    expect(job.jobName).toBe('接口岗位名')
-    expect(job.brandName).toBe('接口公司名')
-    expect(job.salaryDesc).toBe('25-40K')
+    expect(job.job.title).toBe('接口岗位名')
+    expect(job.job.company).toBe('接口公司名')
+    expect(job.job.salary).toBe('25-40K')
     expect(job.jdText).toBe('展开后的完整 JD')
   })
 
   it('占位标题不算已有信息，会被 DOM 读到的名字覆盖', () => {
     const job = buildDomFallbackJob(
       'JD 正文',
-      { securityId: 'sid-1', jobName: EMPTY_JOB_NAME } as any,
+      { job: { title: EMPTY_JOB_NAME }, site: { siteId: 'boss', naturalKey: 'sid-1' } },
       outline,
     )
 
-    expect(job.jobName).toBe('高级后端工程师')
+    expect(job.job.title).toBe('高级后端工程师')
+  })
+
+  it('不继承 base 里的招聘者（否则会把上一个岗位的 HR 挂到当前岗位）', () => {
+    const job = buildDomFallbackJob(
+      'JD 正文',
+      {
+        job: {
+          title: '接口岗位',
+          company: '接口公司',
+          recruiter: { name: '接口岗位的 HR', title: '招聘主管', online: true },
+        },
+        site: { siteId: 'boss', naturalKey: 'sid-1' },
+      },
+      outline,
+    )
+
+    expect(job.job.recruiter).toBeUndefined()
   })
 })

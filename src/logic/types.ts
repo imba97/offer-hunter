@@ -161,76 +161,102 @@ export function createDefaultPromptSettings(): PromptSettings {
 // ---------------------------------------------------------------------------
 
 /**
- * 列表接口返回的岗位（接口字段的子集，只保留我们会用到的）。
- * 注意：薪资只有走接口才是明文，DOM 里是字体加密的乱码，不可用。
+ * 招聘网站标识。
+ *
+ * 目前只有 BOSS 一家。多站点接入后新增站点的适配器各自用自己的 id，
+ * 上层（匹配分析、侧边栏）**不需要认识这些 id**，它们只读 JobCore。
  */
-export interface JobSummary {
-  securityId: string
-  encryptJobId: string
-  encryptBossId: string
-  jobName: string
-  salaryDesc: string
-  jobExperience: string
-  jobDegree: string
-  cityName: string
-  areaDistrict: string
-  businessDistrict: string
-  brandName: string
-  brandIndustry: string
-  brandScaleName: string
-  brandStageName: string
-  bossName: string
-  bossTitle: string
-  bossOnline: boolean
-  skills: string[]
+export type SiteId = 'boss'
+
+/**
+ * 站点身份与站点私有数据。
+ *
+ * 存在的意义是把「站点的东西」从岗位本身里摘出去：这些字段的形状由各家的 wire
+ * 格式决定（BOSS 叫 securityId / encryptBossId，别家叫别的），一旦混进
+ * JobCore，加第二个站点时每个上层消费方都得改。
+ *
+ * `naturalKey` 是该站点内岗位的稳定标识。BOSS 用 URL 上的 securityId ——
+ * 详情接口也只认它（encryptJobId 不行）。
+ */
+export interface SiteRef {
+  /** 哪个站点；同时是账本主键的命名空间来源 */
+  siteId: SiteId
+  /** 站点内唯一且稳定的岗位标识（BOSS = securityId） */
+  naturalKey: string
+  /** 站点私有 id，原样保留供将来深链/刷新用，上层不读 */
+  ids?: Record<string, string>
+  /** 接口原始响应，仅供诊断；不上报、不参与匹配 */
+  raw?: unknown
 }
 
-/** 岗位 + JD 全文，即面板展示与 AI 分析的输入 */
-export interface JobView extends JobSummary {
+/** 办公地点。三个层级并非所有站点都给，缺失即省略。 */
+export interface JobLocation {
+  city?: string
+  district?: string
+  businessDistrict?: string
+}
+
+/** 招聘者（BOSS 叫「Boss」，别家叫 HR / 招聘负责人）。 */
+export interface RecruiterCore {
+  name: string
+  title?: string
+  online?: boolean
+}
+
+/**
+ * 站点无关的岗位模型 —— **AI 匹配与侧边栏面板唯一依赖的形态**。
+ *
+ * 字段名刻意去掉站点色彩（jobName→title、brandName→company、bossName→recruiter）：
+ * 这样加第二个招聘网站时，matching.ts / Sidepanel.vue / JobDetailCard.vue
+ * 一行都不用改，只有站点适配器负责把自己的 wire 格式翻译成这个形状。
+ *
+ * 原先这里是 18 个必填字段且交织着 BOSS 私有字段（securityId / encryptJobId /
+ * bossOnline），导致「领域模型」实际上就是 BOSS 的接口格式。
+ */
+export interface JobCore {
+  title: string
+  company?: string
+  salary?: string
+  experience?: string
+  degree?: string
+  location?: JobLocation
+  /** 站点给出的技能标签 */
+  skills?: string[]
+  /** 公司信息（行业 / 规模 / 融资阶段），各家能给多少给多少 */
+  companyIndustry?: string
+  companyScale?: string
+  companyStage?: string
+  recruiter?: RecruiterCore
+}
+
+/**
+ * 岗位 + JD 全文，即面板展示与 AI 分析的输入。
+ *
+ * 等于「通用岗位信息 + 站点身份 + 取数元数据」。三个分组各管一件事：
+ * 适配器只负责填满它们，上层只读 `JobCore` 那部分。
+ */
+export interface JobView {
+  job: JobCore
+  site: SiteRef
+  /** JD 全文 */
   jdText: string
-  address: string
+  address?: string
   /** 来源：接口捕获 / DOM 回退 */
   source: 'api' | 'dom'
   capturedAt: string
 }
 
-export interface JobDetail {
-  jdText: string
-  address: string
-  skills: string[]
-}
-
-/** DOM 兜底时拿不到岗位名，用这句占位，避免面板出现空白标题 */
-export const EMPTY_JOB_NAME = '（未能从接口读取岗位信息）'
-
 /**
  * 造一个「只有 JD」的最小岗位视图。
  *
- * 存在的意义：这套字段有 22 个，三处各写一遍字面量时，任何一次加字段都会漏改其中
- * 一两处，而漏改的表现是静默的 undefined（渲染期才炸）。统一从这里造。
+ * 存在的意义：字段一旦散落在多处各写一遍字面量，加字段就会漏改其中一两处，
+ * 而漏改的表现是静默的 undefined（渲染期才炸）。统一从这里造。
  */
 export function createEmptyJobView(patch: Partial<JobView> = {}): JobView {
   return {
-    securityId: '',
-    encryptJobId: '',
-    encryptBossId: '',
-    jobName: EMPTY_JOB_NAME,
-    salaryDesc: '',
-    jobExperience: '',
-    jobDegree: '',
-    cityName: '',
-    areaDistrict: '',
-    businessDistrict: '',
-    brandName: '',
-    brandIndustry: '',
-    brandScaleName: '',
-    brandStageName: '',
-    bossName: '',
-    bossTitle: '',
-    bossOnline: false,
-    skills: [],
+    job: { title: '' },
+    site: { siteId: 'boss', naturalKey: '' },
     jdText: '',
-    address: '',
     source: 'dom',
     capturedAt: new Date().toISOString(),
     ...patch,
@@ -247,13 +273,21 @@ export function createEmptyJobView(patch: Partial<JobView> = {}): JobView {
  * 刻意不记「状态」：那套状态机是为自动化流程（低于阈值自动跳过、自动推进到
  * 下一步）服务的，自动化移除后没有任何消费方，只会在界面上冒出「已跳过」
  * 这类用户既看不懂、也不需要关心的字样。
+ *
+ * ⚠ 显示字段是 JobCore 的**扁平快照**，不是嵌套的 `job: JobCore`。
+ * 原因是 storage 的 mergeDefaults 只对 fallback 声明过的键做合并，
+ * 存量记录里没有 `job` 这个键 → 会被填成 undefined → 面板读 `record.job.title`
+ * 直接抛 TypeError。扁平字段名与旧记录一一对应，老数据天然读得出来。
+ *
+ * securityId 同理保留原名：它同时是这张表的键，改名会让存量账本的键失效。
+ * 多站点接入时这里要换成 `siteId:naturalKey` 命名空间键（记忆：本步不动存储格式）。
  */
 export interface JobRecord {
   securityId: string
-  jobName: string
-  brandName: string
-  bossName: string
-  salaryDesc: string
+  title: string
+  company: string
+  recruiterName: string
+  salary: string
   match: MatchResult | null
   greeting: string | null
   /** 匹配或生成失败的原因 */

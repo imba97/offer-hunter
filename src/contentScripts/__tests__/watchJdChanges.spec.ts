@@ -82,8 +82,8 @@ describe('watchJdChanges', () => {
 
     stop = watchJdChanges()
 
-    expect(currentJob.value?.jobName).toBe('资深前端工程师')
-    expect(currentJob.value?.brandName).toBe('某互联网公司')
+    expect(currentJob.value?.job.title).toBe('资深前端工程师')
+    expect(currentJob.value?.job.company).toBe('某互联网公司')
   })
 
   it('同一岗位的折叠版 JD 不会覆盖已更完整的内容', async () => {
@@ -105,8 +105,8 @@ describe('watchJdChanges', () => {
     // 模拟接口已捕获到岗位 B（与 DOM 文本互不包含）
     currentJob.value = {
       ...currentJob.value!,
-      securityId: 'sid-b',
-      jobName: '接口岗位 B',
+      job: { title: '接口岗位 B' },
+      site: { siteId: 'boss', naturalKey: 'sid-b' },
       source: 'api',
       jdText: '岗位 B 的完整 JD',
     }
@@ -114,7 +114,7 @@ describe('watchJdChanges', () => {
     setJd('岗位 C 的 JD')
     await vi.advanceTimersByTimeAsync(150)
 
-    expect(currentJob.value?.jobName).toBe('接口岗位 B')
+    expect(currentJob.value?.job.title).toBe('接口岗位 B')
     expect(currentJob.value?.jdText).toBe('岗位 B 的完整 JD')
   })
 

@@ -4,6 +4,7 @@ import { sendMessage } from 'webext-bridge/content-script'
 import { JOB_DETAIL_API, toJobView } from '~/logic/boss/api'
 import { buildDomFallbackJob, getJdElement, readJdFromDom, readJobOutlineFromDom } from '~/logic/boss/dom'
 import { JOB_DETAIL_BOX, securityIdFromUrl } from '~/logic/boss/selectors'
+import { createEmptyJobView } from '~/logic/types'
 
 /**
  * 内容脚本内的共享状态。
@@ -80,7 +81,7 @@ function applyJobView(zpData: unknown, securityId: string): boolean {
     return false
 
   const existing = currentJob.value
-  if (existing?.source === 'api' && existing.securityId && existing.securityId === view.securityId)
+  if (existing?.source === 'api' && existing.site.naturalKey && existing.site.naturalKey === view.site.naturalKey)
     return false
 
   currentJob.value = view
@@ -176,7 +177,7 @@ const JD_MUTATION_DEBOUNCE_MS = 120
 function isSameJob(existing: JobView, jd: string): boolean {
   const securityId = securityIdFromUrl(window.location.href)
   if (securityId)
-    return securityId === existing.securityId
+    return securityId === existing.site.naturalKey
   if (!existing.jdText)
     return true
   return jd.includes(existing.jdText) || existing.jdText.includes(jd)
@@ -249,7 +250,11 @@ export function watchJdChanges(): () => void {
     else {
       // 此前没有岗位，或是在 DOM 数据之间切换：重置身份，只带 URL 上的 securityId
       const securityId = securityIdFromUrl(window.location.href)
-      currentJob.value = buildDomFallbackJob(jd, securityId ? { securityId } : null, outline)
+      currentJob.value = buildDomFallbackJob(
+        jd,
+        securityId ? createEmptyJobView({ site: { siteId: 'boss', naturalKey: securityId } }) : null,
+        outline,
+      )
     }
 
     // eslint-disable-next-line no-console

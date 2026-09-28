@@ -1,4 +1,4 @@
-import type { JobRecord, JobSummary, JobView, MatchResult } from '~/logic/types'
+import type { JobCore, JobRecord, JobView, MatchResult } from '~/logic/types'
 import { onMessage, sendMessage } from 'webext-bridge/background'
 import { isBossPageUrl, JOBS_PAGE_URL } from '~/logic/boss/selectors'
 import { broadcastToPages, handleBackgroundRequests } from '~/logic/messaging'
@@ -178,7 +178,7 @@ async function onAiTest() {
   }
 }
 
-async function onAiMatch(data: { job: JobSummary, jdText: string }) {
+async function onAiMatch(data: { job: JobCore, jdText: string }) {
   try {
     const [settings, resume, prompts] = await Promise.all([
       readAiSettings(),
@@ -200,7 +200,7 @@ async function onAiMatch(data: { job: JobSummary, jdText: string }) {
   }
 }
 
-async function onAiGreeting(data: { job: JobSummary, jdText: string, match?: MatchResult | null }) {
+async function onAiGreeting(data: { job: JobCore, jdText: string, match?: MatchResult | null }) {
   try {
     const [settings, resume, prompts] = await Promise.all([
       readAiSettings(),

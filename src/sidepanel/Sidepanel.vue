@@ -43,9 +43,10 @@ function selectTab(t: Tab) {
 
 const record = computed<JobRecord | null>(() => {
   const job = currentJob.value
-  if (!job?.securityId)
+  const key = job?.site.naturalKey
+  if (!key)
     return null
-  return records[job.securityId] ?? null
+  return records[key] ?? null
 })
 
 const busy = ref({ matching: false, greeting: false })
@@ -61,7 +62,7 @@ let seenFirstJob = false
 function jobKey(job: JobView | null | undefined): string | null {
   if (!job)
     return null
-  return job.securityId || job.jdText || null
+  return job.site.naturalKey || job.jdText || null
 }
 
 /** 岗位确实换了才提示，并（在用户没手动切过标签时）跳回「岗位」页 */
@@ -144,22 +145,23 @@ onUnmounted(() => {
 
 async function persist(patch: Partial<JobRecord>) {
   const job = currentJob.value
-  if (!job?.securityId)
+  const key = job?.site.naturalKey
+  if (!key)
     return
-  const existing = records[job.securityId]
+  const existing = records[key]
   const next: JobRecord = {
-    securityId: job.securityId,
-    jobName: job.jobName,
-    brandName: job.brandName,
-    bossName: job.bossName,
-    salaryDesc: job.salaryDesc,
+    securityId: key,
+    title: job.job.title,
+    company: job.job.company ?? '',
+    recruiterName: job.job.recruiter?.name ?? '',
+    salary: job.job.salary ?? '',
     match: existing?.match ?? null,
     greeting: existing?.greeting ?? null,
     error: null,
     firstSeen: existing?.firstSeen ?? new Date().toISOString(),
     ...patch,
   }
-  records[job.securityId] = next
+  records[key] = next
   try {
     await callBackground('upsert-record', next)
   }
@@ -176,15 +178,14 @@ async function runMatch() {
     MessageBox.error('当前岗位没有 JD 内容，无法分析')
     return
   }
-
   busy.value.matching = true
   // 「正在分析」与随后的结果复用同一条提示：一次操作只该留下一条
-  const pending = MessageBox.loading(`正在分析「${job.jobName}」…`)
+  const pending = MessageBox.loading(`正在分析「${job.job.title}」…`)
 
   try {
     const res = await callBackground<{ ok: boolean, data?: MatchResult, error?: string }>(
       'ai-match',
-      { job, jdText: job.jdText },
+      { job: job.job, jdText: job.jdText },
     )
     // 与 runGreeting 同理：`res.data as MatchResult` 这种断言正好绕过了「data 可能没有」，
     // 运行时会在 match.score 上炸成一句看不懂的报错，所以这里显式判空
@@ -220,7 +221,7 @@ async function runGreeting() {
   try {
     const res = await callBackground<{ ok: boolean, data?: GreetingResult, error?: string }>(
       'ai-greeting',
-      { job, jdText: job.jdText, match: record.value?.match ?? null },
+      { job: job.job, jdText: job.jdText, match: record.value?.match ?? null },
     )
     // `data` 在类型上是可选的：契约被破坏时（ok=true 但没带内容）不能直接取 .greeting，
     // 那会抛 "Cannot read properties of undefined"，只剩一句看不懂的报错

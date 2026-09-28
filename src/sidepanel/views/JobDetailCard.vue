@@ -3,7 +3,6 @@ import type { JobRecord, JobView } from '~/logic/types'
 import { computed, ref } from 'vue'
 import ScrollArea from '~/components/ScrollArea.vue'
 import { createEmptyJobView } from '~/logic/types'
-
 /**
  * 当前岗位的详情卡：展示岗位信息与 JD，并提供「匹配 → 生成招呼语 → 复制」三步操作。
  *
@@ -22,7 +21,7 @@ const props = withDefaults(defineProps<{
   record?: JobRecord | null
   busy?: { matching: boolean, greeting: boolean }
 }>(), {
-  // 空岗位视图统一由 createEmptyJobView 造，避免 22 个字段在多处各写一遍
+  // 空岗位视图统一由 createEmptyJobView 造，避免字段在多处各写一遍
   job: () => createEmptyJobView({ source: 'api' }),
   record: null,
   busy: () => ({ matching: false, greeting: false }),
@@ -40,6 +39,9 @@ const match = computed(() => props.record?.match ?? null)
 const greeting = computed(() => props.record?.greeting ?? null)
 const error = computed(() => props.record?.error ?? null)
 
+/** 岗位的通用信息；adapters 只保证 job 存在，内部字段可能缺 */
+const core = computed(() => props.job.job)
+
 const scoreColor = computed(() => {
   const s = match.value?.score
   if (s == null)
@@ -53,20 +55,30 @@ const scoreColor = computed(() => {
   return 'text-red-500'
 })
 
-const location = computed(() =>
-  [props.job.cityName, props.job.areaDistrict, props.job.businessDistrict]
+const location = computed(() => {
+  const loc = core.value.location
+  if (!loc)
+    return ''
+  return [loc.city, loc.district, loc.businessDistrict]
     .filter(Boolean)
-    .join(' · '),
-)
+    .join(' · ')
+})
 
 const companyLine = computed(() =>
-  [props.job.brandName, props.job.brandStageName, props.job.brandScaleName, props.job.brandIndustry]
+  [
+    core.value.company,
+    core.value.companyStage,
+    core.value.companyScale,
+    core.value.companyIndustry,
+  ]
     .filter(Boolean)
     .join(' · '),
 )
 
+const recruiter = computed(() => core.value.recruiter ?? null)
+
 /** 逐个字段兜底：接口字段缺失时退化成空数组，而不是让整块面板白屏 */
-const skills = computed(() => Array.isArray(props.job.skills) ? props.job.skills : [])
+const skills = computed(() => Array.isArray(core.value.skills) ? core.value.skills : [])
 
 const jdText = computed(() => props.job.jdText ?? '')
 
@@ -80,15 +92,15 @@ const jdLines = computed(() => jdText.value.split('\n').filter(l => l.trim().len
       <div class="flex items-start gap-3">
         <div class="min-w-0 flex-1">
           <h2 class="text-sm font-semibold text-gray-800">
-            {{ job.jobName }}
+            {{ core.title }}
           </h2>
-          <p v-if="job.salaryDesc" class="mt-1 text-sm font-medium text-teal-700">
-            {{ job.salaryDesc }}
+          <p v-if="core.salary" class="mt-1 text-sm font-medium text-teal-700">
+            {{ core.salary }}
           </p>
           <div class="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-xs text-gray-500">
             <span v-if="location">{{ location }}</span>
-            <span v-if="job.jobExperience">{{ job.jobExperience }}</span>
-            <span v-if="job.jobDegree">{{ job.jobDegree }}</span>
+            <span v-if="core.experience">{{ core.experience }}</span>
+            <span v-if="core.degree">{{ core.degree }}</span>
           </div>
         </div>
 
@@ -106,10 +118,10 @@ const jdLines = computed(() => jdText.value.split('\n').filter(l => l.trim().len
       <div v-if="companyLine" class="mt-2 border-t border-gray-100 pt-2 text-xs text-gray-500">
         {{ companyLine }}
       </div>
-      <div v-if="job.bossName" class="mt-0.5 text-xs text-gray-500">
-        招聘者：{{ job.bossName }}
-        <span v-if="job.bossTitle">（{{ job.bossTitle }}）</span>
-        <span v-if="job.bossOnline" class="text-teal-600"> · 在线</span>
+      <div v-if="recruiter" class="mt-0.5 text-xs text-gray-500">
+        招聘者：{{ recruiter.name }}
+        <span v-if="recruiter.title">（{{ recruiter.title }}）</span>
+        <span v-if="recruiter.online" class="text-teal-600"> · 在线</span>
       </div>
     </header>
 

@@ -1,4 +1,4 @@
-import type { JobDetail, JobView } from '~/logic/types'
+import type { JobView } from '~/logic/types'
 import { stripCssNoise } from './jd'
 
 /**
@@ -56,6 +56,11 @@ function strArray(v: unknown): string[] {
  * 详情响应里既有 jobInfo（岗位本身）也有 bossInfo / brandComInfo（招聘者与公司），
  * 因此**不需要列表接口**就能拿到面板要展示的全部信息。
  *
+ * 本函数是 BOSS wire 格式 → 通用领域模型（JobCore）的**唯一翻译点**。
+ * 上层拿到的已经是站点无关的名字（title / company / recruiter），因此
+ * 再加一个招聘网站时，matching.ts 与侧边栏不需要改 —— 只有新的适配器
+ * 写自己那一份 toJobView。
+ *
  * ⚠ 薪资必须取接口字段：DOM 里是字体加密的私用区字符，读出来是乱码。
  */
 export function toJobView(zpData: unknown, securityId: string): JobView | null {
@@ -67,8 +72,8 @@ export function toJobView(zpData: unknown, securityId: string): JobView | null {
   const bossInfo = zp?.bossInfo ?? {}
   const brand = zp?.brandComInfo ?? zp?.brandInfo ?? {}
 
-  const jobName = str(jobInfo.jobName)
-  if (!jobName)
+  const title = str(jobInfo.jobName)
+  if (!title)
     return null
 
   // 城市 / 区域：部分响应是拼好的 locationName，部分是分散字段
@@ -77,31 +82,51 @@ export function toJobView(zpData: unknown, securityId: string): JobView | null {
     .split(/[·\s]+/)
     .filter(Boolean)
 
+  const city = str(jobInfo.cityName) || cityName
+  const district = str(jobInfo.areaDistrict) || areaDistrict
+  const business = str(jobInfo.businessDistrict) || businessDistrict
+  const bossName = str(bossInfo.name)
+  const skills = strArray(jobInfo.showSkills).length > 0
+    ? strArray(jobInfo.showSkills)
+    : strArray(jobInfo.skills)
+
   return {
-    securityId,
-    encryptJobId: str(jobInfo.encryptJobId),
-    encryptBossId: str(bossInfo.encryptBossId) || str(jobInfo.encryptBossId),
-    jobName,
-    salaryDesc: str(jobInfo.salaryDesc),
-    jobExperience: str(jobInfo.experienceName) || str(jobInfo.jobExperience),
-    jobDegree: str(jobInfo.degreeName) || str(jobInfo.jobDegree),
-    cityName: str(jobInfo.cityName) || cityName,
-    areaDistrict: str(jobInfo.areaDistrict) || areaDistrict,
-    businessDistrict: str(jobInfo.businessDistrict) || businessDistrict,
-    brandName: str(brand.brandName) || str(brand.name),
-    brandIndustry: str(brand.industryName),
-    brandScaleName: str(brand.scaleName),
-    brandStageName: str(brand.stageName),
-    bossName: str(bossInfo.name),
-    bossTitle: str(bossInfo.title),
-    bossOnline: bool(bossInfo.online),
-    skills: strArray(jobInfo.showSkills).length > 0
-      ? strArray(jobInfo.showSkills)
-      : strArray(jobInfo.skills),
+    job: {
+      title,
+      company: str(brand.brandName) || str(brand.name) || undefined,
+      salary: str(jobInfo.salaryDesc) || undefined,
+      experience: str(jobInfo.experienceName) || str(jobInfo.jobExperience) || undefined,
+      degree: str(jobInfo.degreeName) || str(jobInfo.jobDegree) || undefined,
+      // 三个层级一个都没有时给 undefined，而不是留一个全空对象让 UI 判断
+      location: (city || district || business)
+        ? { city: city || undefined, district: district || undefined, businessDistrict: business || undefined }
+        : undefined,
+      skills: skills.length > 0 ? skills : undefined,
+      companyIndustry: str(brand.industryName) || undefined,
+      companyScale: str(brand.scaleName) || undefined,
+      companyStage: str(brand.stageName) || undefined,
+      recruiter: bossName
+        ? {
+            name: bossName,
+            title: str(bossInfo.title) || undefined,
+            online: bool(bossInfo.online),
+          }
+        : undefined,
+    },
+    site: {
+      siteId: 'boss',
+      naturalKey: securityId,
+      // BOSS 私有 id 原样留着：将来深链/刷新用得上，但上层不该读它们
+      ids: {
+        encryptJobId: str(jobInfo.encryptJobId),
+        encryptBossId: str(bossInfo.encryptBossId) || str(jobInfo.encryptBossId),
+      },
+      raw: zp,
+    },
     // 接口的 postDescription 通常是纯文本，但仍过一遍清洗：
     // 平台偶尔会把带水印标记的片段混进接口字段
     jdText: stripCssNoise(str(jobInfo.postDescription)),
-    address: str(jobInfo.address),
+    address: str(jobInfo.address) || undefined,
     source: 'api',
     capturedAt: new Date().toISOString(),
   }
@@ -118,7 +143,20 @@ async function fetchDetailData(securityId: string): Promise<any> {
   )
 }
 
-/** 岗位详情（面板展示用的精简形态） */
+/**
+ * 详情接口的原始正文形态，只给诊断探针用。
+ *
+ * 刻意留在站点侧、不做成通用模型：它的唯一用途是回答「postDescription 这个
+ * BOSS 字段还在不在」，也就是 securityId → JD 这条契约有没有失效。
+ * 放进 JobCore 会逼着通用模型多背一个站点私有字段。
+ */
+export interface JobDetail {
+  jdText: string
+  address: string
+  skills: string[]
+}
+
+/** 岗位详情（诊断探针用的原始形态） */
 export async function fetchJobDetail(securityId: string): Promise<JobDetail> {
   const zpData = await fetchDetailData(securityId)
   const jobInfo = zpData?.jobInfo ?? {}

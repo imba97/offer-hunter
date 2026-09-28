@@ -1,5 +1,5 @@
 import type { JobView } from '~/logic/types'
-import { createEmptyJobView, EMPTY_JOB_NAME } from '~/logic/types'
+import { createEmptyJobView } from '~/logic/types'
 import { extractCleanText } from './jd'
 import {
   JOB_COMPANY_SELECTORS,
@@ -48,6 +48,14 @@ export interface DomJobOutline {
   jobName: string
   brandName: string
 }
+
+/**
+ * DOM 兜底时拿不到岗位名，用这句占位，避免面板出现空白标题。
+ *
+ * 放在站点侧而不是通用模型里：这句文案描述的是「BOSS 详情接口没读到」，
+ * 别家站点兜底失败时的说法未必一样，不该由 JobCore 承担。
+ */
+export const EMPTY_JOB_NAME = '（未能从接口读取岗位信息）'
 
 /** 标题/公司名的长度上限：超过这个长度基本是把整段描述当成了名字 */
 const NAME_MAX_CHARS = 40
@@ -111,13 +119,30 @@ export function buildDomFallbackJob(
   base?: Partial<JobView> | null,
   outline?: DomJobOutline | null,
 ): JobView {
-  const fromBase = base ?? {}
+  const baseJob = base?.job
 
   return createEmptyJobView({
-    ...outline,
-    ...fromBase,
-    jobName: prefer(fromBase.jobName, outline?.jobName, EMPTY_JOB_NAME),
-    brandName: prefer(fromBase.brandName, outline?.brandName, ''),
+    job: {
+      ...baseJob,
+      title: prefer(baseJob?.title, outline?.jobName, EMPTY_JOB_NAME),
+      // 占位/空公司名归一成 undefined，让「没有」只有一种表示
+      company: prefer(baseJob?.company, outline?.brandName, '') || undefined,
+      /*
+       * 招聘者刻意**不**从 base 继承。
+       *
+       * 只有详情接口能给招聘者信息，DOM 读不到它；而这条路径的语义正是
+       * 「接口数据没有或认不出是同一岗位」。此时保留 base 里的招聘者，
+       * 就会把上一个岗位的 HR 挂到当前岗位上（同 base 里薪资/公司名不能跨岗位
+       * 复用的是同一个坑，只是招聘者是从 job 对象里整个带过来的，更隐蔽）。
+       */
+      recruiter: undefined,
+    },
+    // 站点身份沿用 base（含接口给的私有 id），只补 naturalKey
+    site: {
+      siteId: 'boss',
+      ...base?.site,
+      naturalKey: base?.site?.naturalKey ?? '',
+    },
     jdText,
     source: 'dom',
   })

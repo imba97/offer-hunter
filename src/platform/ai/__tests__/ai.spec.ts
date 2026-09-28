@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildGreetingSystem,
   buildMatchSystem,
+  buildPromptJobText,
   fitInputs,
   normalizeGreeting,
   normalizeMatchResult,
@@ -170,5 +171,51 @@ describe('fitInputs', () => {
     expect(out.resume).toContain('简历过长')
     // JD 预算独立计算，不该因为简历超长就被吃掉
     expect(out.jd).toBe('JD')
+  })
+})
+
+/**
+ * 通用岗位模型 → 提示词文本。
+ *
+ * 这一层是「加第二个招聘网站时 AI 侧不用改」的保证：输入只有 JobCore，
+ * 站点私有字段一律不出现。缺字段必须退化成空串而不是 undefined。
+ */
+describe('buildPromptJobText', () => {
+  const fullJob = {
+    title: '高级后端工程师',
+    company: '某某科技',
+    salary: '25-40K',
+    experience: '3-5 年',
+    degree: '本科',
+    location: { city: '上海', district: '浦东新区', businessDistrict: '张江' },
+    skills: ['Go', 'Kubernetes'],
+    companyIndustry: '互联网',
+    companyScale: '500-999 人',
+    recruiter: { name: '张女士', title: '招聘主管' },
+  }
+
+  it('站点无关字段逐项拼进文本', () => {
+    const text = buildPromptJobText(fullJob)
+
+    expect(text).toContain('职位：高级后端工程师')
+    expect(text).toContain('公司：某某科技（互联网 / 500-999 人）')
+    expect(text).toContain('薪资：25-40K')
+    expect(text).toContain('经验要求：3-5 年')
+    expect(text).toContain('学历要求：本科')
+    expect(text).toContain('地点：上海浦东新区 · 张江')
+    expect(text).toContain('技能标签：Go、Kubernetes')
+  })
+
+  it('招聘者默认不出现，只有招呼语那一轮要', () => {
+    expect(buildPromptJobText(fullJob)).not.toContain('招聘者')
+    expect(buildPromptJobText(fullJob, { withRecruiter: true })).toContain('招聘者：张女士（招聘主管）')
+  })
+
+  it('字段缺失时退化成空串，不出现 undefined', () => {
+    const text = buildPromptJobText({ title: '前端工程师' })
+
+    expect(text).toContain('职位：前端工程师')
+    expect(text).not.toContain('undefined')
+    expect(text).not.toContain('招聘者')
   })
 })

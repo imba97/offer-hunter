@@ -10,6 +10,7 @@ import {
   JOB_TITLE_SELECTORS,
   securityIdFromUrl,
 } from '~/logic/boss/selectors'
+import { createEmptyJobView } from '~/logic/types'
 import {
   capturedApis,
   currentJob,
@@ -77,9 +78,9 @@ async function resolveCurrentJob(force = false): Promise<void> {
   if (!jd || jd === currentJob.value?.jdText)
     return
 
-  const base = currentJob.value?.securityId === securityId
+  const base = currentJob.value?.site.naturalKey === securityId
     ? currentJob.value
-    : (securityId ? { securityId } : null)
+    : (securityId ? createEmptyJobView({ site: { siteId: 'boss', naturalKey: securityId } }) : null)
 
   currentJob.value = buildDomFallbackJob(jd, base, readJobOutlineFromDom())
 }
@@ -107,7 +108,7 @@ async function collectDiagnostic(): Promise<DiagnosticResult> {
       error: a.error,
     })),
     hasCurrentJob: job !== null,
-    currentJobName: job?.jobName ?? null,
+    currentJobName: job?.job.title ?? null,
     currentJobSource: job?.source ?? null,
     jdLength: job?.jdText.length ?? 0,
     detailProbe: null,
@@ -115,11 +116,12 @@ async function collectDiagnostic(): Promise<DiagnosticResult> {
   }
 
   // 详情接口探针：验证 securityId 契约是否仍然成立
-  if (job?.securityId) {
+  const securityId = job?.site.naturalKey ?? ''
+  if (securityId) {
     try {
-      const detail = await fetchJobDetail(job.securityId)
+      const detail = await fetchJobDetail(securityId)
       result.detailProbe = {
-        securityId: job.securityId,
+        securityId,
         ok: true,
         hasPostDescription: detail.jdText.length > 0,
         jdPreview: detail.jdText.slice(0, 120),
@@ -127,7 +129,7 @@ async function collectDiagnostic(): Promise<DiagnosticResult> {
     }
     catch (error) {
       result.detailProbe = {
-        securityId: job.securityId,
+        securityId,
         ok: false,
         hasPostDescription: false,
         jdPreview: '',
