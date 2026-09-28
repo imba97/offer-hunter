@@ -2,21 +2,22 @@
 import type { DiagnosticResult, JobRecord, JobView, MatchingSettings, MatchResult } from '~/logic/types'
 import type { GreetingResult } from '~/platform/ai/matching'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import ScrollArea from '~/components/ScrollArea.vue'
 import { JOBS_PAGE_URL } from '~/logic/boss/selectors'
 import { callBackground } from '~/logic/messaging'
 import { STORAGE_KEYS, useStoredValue } from '~/logic/storage'
 import { createDefaultMatchingSettings } from '~/logic/types'
+import { MessageBox } from './message-box'
+import MessageBoxHost from './MessageBox.vue'
 import {
   currentJob,
   diagnostic,
   listenForJobChanges,
   listenForTabChanges,
-  notice,
   pageState,
   records,
   refreshCurrentJob,
   refreshPageState,
-  setNotice,
   syncRecords,
 } from './state'
 import Diagnostics from './views/Diagnostics.vue'
@@ -83,7 +84,8 @@ function announceSwitch(previousKey: string | null): void {
 
   if (!userSwitchedTab.value)
     tab.value = 'job'
-  setNotice('已切换到新岗位', 'info')
+  // 岗位切换本身已经体现在面板内容上了，提示只作为「刚才发生了什么」的补充
+  MessageBox.info('已切换到新岗位')
 }
 
 /**
@@ -179,39 +181,43 @@ async function runMatch() {
   if (!job || busy.value.matching)
     return
   if (!job.jdText.trim()) {
-    setNotice('当前岗位没有 JD 内容，无法分析', 'error')
+    MessageBox.error('当前岗位没有 JD 内容，无法分析')
     return
   }
 
   busy.value.matching = true
-  setNotice(`正在分析「${job.jobName}」…`)
+  // 「正在分析」与随后的结果复用同一条提示：一次操作只该留下一条
+  const pending = MessageBox.loading(`正在分析「${job.jobName}」…`)
 
   try {
     const res = await callBackground<{ ok: boolean, data?: MatchResult, error?: string }>(
       'ai-match',
       { job, jdText: job.jdText },
     )
-    if (!res.ok) {
-      await persist({ status: 'failed', error: res.error })
-      setNotice(res.error, 'error')
+    // 与 runGreeting 同理：`res.data as MatchResult` 这种断言正好绕过了「data 可能没有」，
+    // 运行时会在 match.score 上炸成一句看不懂的报错，所以这里显式判空
+    if (!res.ok || !res.data) {
+      await persist({ status: 'failed', error: res.error ?? '分析失败：没有拿到结果' })
+      MessageBox.update(pending, res.error ?? '分析失败：没有拿到结果', { kind: 'error' })
       return
     }
 
-    const match = res.data as MatchResult
+    const match = res.data
     const threshold = matching.value.scoreThreshold
     const passed = match.score >= threshold
     await persist({ match, status: passed ? 'scored' : 'skipped', error: null })
-    setNotice(
+    MessageBox.update(
+      pending,
       passed
         ? `匹配度 ${match.score}（阈值 ${threshold}）：${match.summary}`
         : `匹配度 ${match.score}，低于阈值 ${threshold}：${match.summary}`,
-      passed ? 'success' : 'info',
+      { kind: passed ? 'success' : 'info' },
     )
   }
   catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
     await persist({ status: 'failed', error: msg })
-    setNotice(msg, 'error')
+    MessageBox.update(pending, msg, { kind: 'error' })
   }
   finally {
     busy.value.matching = false
@@ -224,22 +230,24 @@ async function runGreeting() {
     return
 
   busy.value.greeting = true
-  setNotice('正在生成招呼语…')
+  const pending = MessageBox.loading('正在生成招呼语…')
 
   try {
     const res = await callBackground<{ ok: boolean, data?: GreetingResult, error?: string }>(
       'ai-greeting',
       { job, jdText: job.jdText, match: record.value?.match ?? null },
     )
-    if (!res.ok) {
-      setNotice(res.error, 'error')
+    // `data` 在类型上是可选的：契约被破坏时（ok=true 但没带内容）不能直接取 .greeting，
+    // 那会抛 "Cannot read properties of undefined"，只剩一句看不懂的报错
+    if (!res.ok || !res.data) {
+      MessageBox.update(pending, res.error ?? '生成失败：没有拿到招呼语内容', { kind: 'error' })
       return
     }
     await persist({ greeting: res.data.greeting, status: 'drafted' })
-    setNotice('招呼语已生成，点「复制」后到 BOSS 粘贴发送', 'success')
+    MessageBox.update(pending, '招呼语已生成，点「复制」后到 BOSS 粘贴发送', { kind: 'success' })
   }
   catch (error) {
-    setNotice(error instanceof Error ? error.message : String(error), 'error')
+    MessageBox.update(pending, error instanceof Error ? error.message : String(error), { kind: 'error' })
   }
   finally {
     busy.value.greeting = false
@@ -251,8 +259,8 @@ function copyGreeting() {
   if (!text)
     return
   navigator.clipboard.writeText(text)
-    .then(() => setNotice('已复制到剪贴板', 'success'))
-    .catch(() => setNotice('复制失败，请手动选择文本', 'error'))
+    .then(() => MessageBox.success('已复制到剪贴板'))
+    .catch(() => MessageBox.error('复制失败，请手动选择文本'))
 }
 
 async function runDiagnostic() {
@@ -263,14 +271,14 @@ async function runDiagnostic() {
     )
     if (res?.ok) {
       diagnostic.result = res.result ?? null
-      setNotice('诊断完成', 'success')
+      MessageBox.success('诊断完成')
     }
     else {
-      setNotice(res?.reason ?? '诊断失败', 'error')
+      MessageBox.error(res?.reason ?? '诊断失败')
     }
   }
   catch (error) {
-    setNotice(error instanceof Error ? error.message : String(error), 'error')
+    MessageBox.error(error instanceof Error ? error.message : String(error))
   }
   finally {
     diagnostic.running = false
@@ -318,76 +326,66 @@ function openJobsPage() {
           </button>
         </div>
       </header>
+    </div>
 
-      <!-- 提示条：绝对定位，不挤占内容高度 -->
-      <Transition name="oh-toast">
-        <div
-          v-if="notice.text"
-          class="oh-toast absolute inset-x-0 top-full flex items-start gap-1.5 px-3 py-1.5 text-xs shadow-sm"
-          :class="{
-            'bg-red-50/95 text-red-700': notice.kind === 'error',
-            'bg-teal-50/95 text-teal-700': notice.kind === 'success',
-            'bg-gray-100/95 text-gray-600': notice.kind === 'info',
-          }"
-        >
-          <span
-            class="mt-[2px] shrink-0 text-sm"
-            :class="{
-              'i-tabler-alert-triangle': notice.kind === 'error',
-              'i-tabler-circle-check': notice.kind === 'success',
-              'i-tabler-info-circle': notice.kind === 'info',
-            }"
+    <!--
+      内容区：滚动条交给 ScrollArea 自绘。
+      它同时管三件事：隐藏原生滚动条（宽度恒定，内容不会因为滚动条出现/消失而左右抽动）、
+      悬停容器时渐显、悬停到滚动条上再明显一些。
+    -->
+    <ScrollArea class="min-h-0 flex-1">
+      <div class="p-3">
+        <div v-if="tab === 'job'">
+          <!-- 不在 BOSS 页面 -->
+          <div v-if="!pageState.onBoss" class="px-2 py-8 text-center">
+            <span class="i-tabler-world-off mx-auto mb-3 block text-3xl text-gray-300" />
+            <p class="text-xs text-gray-500">
+              当前标签页不是 BOSS 直聘。<br>
+              请先在 BOSS 上打开一个职位页面。
+            </p>
+            <button class="oh-btn oh-btn-primary mt-3" @click="openJobsPage">
+              打开 BOSS 职位页
+            </button>
+          </div>
+
+          <!-- 在 BOSS 页面但还没点开岗位 -->
+          <div v-else-if="!currentJob.value" class="px-2 py-8 text-center">
+            <span class="i-tabler-hand-click mx-auto mb-3 block text-3xl text-gray-300" />
+            <p class="text-xs text-gray-500">
+              还没有选中岗位。<br><br>
+              请在 BOSS 职位列表里<strong class="text-gray-600">点击任意岗位卡片</strong>，
+              这里会自动显示该岗位的详情与匹配分析。
+            </p>
+          </div>
+
+          <JobDetailCard
+            v-else
+            :job="currentJob.value"
+            :record="record"
+            :busy="busy"
+            @match="runMatch"
+            @greeting="runGreeting"
+            @copy="copyGreeting"
           />
-          <span class="min-w-0">{{ notice.text }}</span>
-        </div>
-      </Transition>
-    </div>
-
-    <!-- 内容 -->
-    <div class="min-h-0 flex-1 overflow-y-auto">
-      <div v-if="tab === 'job'" class="p-3">
-        <!-- 不在 BOSS 页面 -->
-        <div v-if="!pageState.onBoss" class="px-2 py-8 text-center">
-          <span class="i-tabler-world-off mx-auto mb-3 block text-3xl text-gray-300" />
-          <p class="text-xs text-gray-500">
-            当前标签页不是 BOSS 直聘。<br>
-            请先在 BOSS 上打开一个职位页面。
-          </p>
-          <button class="oh-btn oh-btn-primary mt-3" @click="openJobsPage">
-            打开 BOSS 职位页
-          </button>
         </div>
 
-        <!-- 在 BOSS 页面但还没点开岗位 -->
-        <div v-else-if="!currentJob.value" class="px-2 py-8 text-center">
-          <span class="i-tabler-hand-click mx-auto mb-3 block text-3xl text-gray-300" />
-          <p class="text-xs text-gray-500">
-            还没有选中岗位。<br><br>
-            请在 BOSS 职位列表里<strong class="text-gray-600">点击任意岗位卡片</strong>，
-            这里会自动显示该岗位的详情与匹配分析。
-          </p>
-        </div>
-
-        <JobDetailCard
-          v-else
-          :job="currentJob.value"
-          :record="record"
-          :busy="busy"
-          @match="runMatch"
-          @greeting="runGreeting"
-          @copy="copyGreeting"
+        <Diagnostics
+          v-else-if="tab === 'diagnostics'"
+          :result="diagnostic.result"
+          :running="diagnostic.running"
+          @run="runDiagnostic"
         />
+
+        <QuickSettings v-else />
       </div>
+    </ScrollArea>
 
-      <Diagnostics
-        v-else-if="tab === 'diagnostics'"
-        :result="diagnostic.result"
-        :running="diagnostic.running"
-        @run="runDiagnostic"
-      />
-
-      <QuickSettings v-else />
-    </div>
+    <!--
+      底部提示条：fixed 浮层，不在内容流里，也不改变滚动区高度。
+      曾经给它垫过等高留白（为了「永不被遮」），代价是提示多一条就冒出滚动条、
+      少一条又缩回去 —— 滚动条本身占宽，内容跟着左右抽动。遮挡改由交互化解。
+    -->
+    <MessageBoxHost />
   </div>
 </template>
 
@@ -397,21 +395,6 @@ function openJobsPage() {
   backdrop-filter: blur(12px) saturate(180%);
   -webkit-backdrop-filter: blur(12px) saturate(180%);
   border-bottom: 1px solid rgba(0, 0, 0, 0.06);
-}
-
-.oh-toast {
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-}
-.oh-toast-enter-active,
-.oh-toast-leave-active {
-  transition: opacity 0.15s ease, transform 0.15s ease;
-}
-.oh-toast-enter-from,
-.oh-toast-leave-to {
-  opacity: 0;
-  transform: translateY(-4px);
 }
 
 .oh-icon-btn {

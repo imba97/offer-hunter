@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { JobRecord, JobView } from '~/logic/types'
 import { computed, ref } from 'vue'
+import ScrollArea from '~/components/ScrollArea.vue'
 import { createEmptyJobView } from '~/logic/types'
 
 /**
@@ -143,14 +144,19 @@ const jdLines = computed(() => jdText.value.split('\n').filter(l => l.trim().len
         <span>岗位描述（{{ jdText.length }} 字）</span>
         <span class="text-gray-400">{{ showJd ? '收起' : '展开' }}</span>
       </button>
-      <div v-if="showJd" class="max-h-64 overflow-y-auto border-t border-gray-100 px-3 py-2">
+      <!--
+        JD 通常比面板长得多，这里限高 + 内部滚动。
+        滚动条由 ScrollArea 自绘（原生滚动条会占宽，把文字挤窄、还会随内容长短抽动）。
+        `pr-3` 是把滚动条的位置让出来，否则它会浮在文字上。
+      -->
+      <ScrollArea v-if="showJd" class="max-h-64 border-t border-gray-100 px-3" scroller-class="py-2">
         <p v-if="!jdLines.length" class="text-xs text-gray-400">
           没有读到 JD 内容
         </p>
         <p v-for="(line, i) in jdLines" :key="i" class="mb-1 text-xs leading-relaxed text-gray-600">
           {{ line }}
         </p>
-      </div>
+      </ScrollArea>
     </section>
 
     <!-- 匹配结论 -->

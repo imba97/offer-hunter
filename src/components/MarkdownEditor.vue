@@ -40,6 +40,26 @@ const host = ref<HTMLDivElement | null>(null)
 const status = ref('正在加载编辑器…')
 const failed = ref(false)
 
+/**
+ * Monaco 只认自己的主题色，不能共用 ScrollArea 那套 CSS，所以把滚动条颜色写进主题里。
+ *
+ * 三个色值刻意对齐 ScrollArea 的滑块（30% / 50% / 62% 的深灰）：
+ * 同屏有两个滚动条时（设置页整体 + 编辑器），不该是两种东西。
+ * 注意 Monaco 的颜色注册表要求 `#RRGGBBAA`，不认 `rgba()` 写法。
+ */
+const EDITOR_THEME = 'vitesse-dark-oh'
+const editorTheme = {
+  ...vitesseDark,
+  name: EDITOR_THEME,
+  colors: {
+    ...vitesseDark.colors,
+    'scrollbar.shadow': '#00000000',
+    'scrollbarSlider.background': '#1118274d',
+    'scrollbarSlider.hoverBackground': '#11182780',
+    'scrollbarSlider.activeBackground': '#1118279e',
+  },
+}
+
 // Monaco 实例不需要深层响应式
 const editor = shallowRef<monaco.editor.IStandaloneCodeEditor | null>(null)
 
@@ -57,7 +77,7 @@ async function initEditor(): Promise<void> {
   status.value = '正在加载语法高亮…'
 
   const highlighter = await createHighlighterCore({
-    themes: [vitesseDark],
+    themes: [editorTheme],
     langs: [markdown],
     engine: createJavaScriptRegexEngine(),
   })
@@ -73,7 +93,7 @@ async function initEditor(): Promise<void> {
   editor.value = monaco.editor.create(host.value, {
     value: props.modelValue,
     language: 'markdown',
-    theme: 'vitesse-dark',
+    theme: EDITOR_THEME,
     automaticLayout: true,
     minimap: { enabled: false },
     fontSize: 12.5,
@@ -147,6 +167,21 @@ onBeforeUnmount(() => {
 .oh-editor-host {
   height: 420px;
   width: 100%;
+}
+/*
+  Monaco 自绘不了「半透明」以外的效果（它的滑块本来就是原生的），
+  这里只补一条：悬停滑块时加粗一点，跟 ScrollArea 的观感对上。
+  颜色不在这里写 —— 走主题里的 scrollbarSlider.*（见 EDITOR_THEME）。
+
+  ⚠ 只能改 `.vertical`：水平滑块靠 `width` 占位（构建产物里它本来是 650px），
+  把它一起改成 8px 会让水平条绘制位置错乱；垂直滑块才是靠 `height` 定位。
+*/
+.oh-editor-wrap :deep(.monaco-scrollbar.vertical > .slider) {
+  width: 8px;
+  transition: width 0.15s ease, left 0.15s ease, top 0.15s ease;
+}
+.oh-editor-wrap :deep(.monaco-scrollbar.vertical > .slider:hover) {
+  width: 10px;
 }
 .oh-editor-status {
   position: absolute;

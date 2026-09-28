@@ -25,24 +25,6 @@ export const diagnostic = reactive<{ result: DiagnosticResult | null, running: b
   running: false,
 })
 
-/** 最近一条提示 */
-export const notice = reactive<{ text: string, kind: 'info' | 'error' | 'success' }>({
-  text: '',
-  kind: 'info',
-})
-
-let noticeTimer: ReturnType<typeof setTimeout> | null = null
-
-export function setNotice(text: string, kind: 'info' | 'error' | 'success' = 'info'): void {
-  notice.text = text
-  notice.kind = kind
-  if (noticeTimer)
-    clearTimeout(noticeTimer)
-  noticeTimer = setTimeout(() => {
-    notice.text = ''
-  }, 6000)
-}
-
 /** 当前标签页是否在 BOSS 页面（决定提示文案与操作可用性） */
 export const pageState = reactive({ onBoss: false })
 
