@@ -145,6 +145,25 @@ export function normalizeMatchResult(raw: unknown): MatchResult {
 // AI 精判
 // ---------------------------------------------------------------------------
 
+/**
+ * 把用户自定义提示词接到内置提示词后面。
+ *
+ * 单独成段并声明优先级，避免与上面的通用要求混在一起时被模型当成「建议」而忽略。
+ * 冲突时以用户规则为准 —— 那是他明确的意图。两段提示词（打分口径、招呼语规则）
+ * 走同一条拼装路径，免得只有一边享受「优先级最高」这个待遇。
+ */
+export function withUserPrompt(base: string, userPrompt: string): string {
+  const custom = userPrompt.trim()
+  if (!custom)
+    return base
+
+  return `${base}
+
+## 用户的额外要求（优先级最高）
+以下要求由用户指定，请严格遵循。若与上面的通用要求冲突，以本节为准：
+${custom}`
+}
+
 const MATCH_SYSTEM = `你是一位资深的技术招聘顾问，擅长判断候选人与岗位的真实匹配程度。
 
 评判原则：
@@ -161,8 +180,18 @@ const MATCH_SCHEMA_HINT = `json 结构：
   "missingSkills": ["简历中缺失但岗位要求的技能，0-5 条"]
 }`
 
-export interface MatchOptions {
-  /** 生成招呼语时的用户自定义规则 */
+/**
+ * 匹配度分析用的 system prompt（含用户自定义的评判口径）。
+ *
+ * 用户写的是「怎么打分」，不是「怎么回 JSON」：输出结构由 requestJson 追加在
+ * 最后，仍然生效。
+ */
+export function buildMatchSystem(userPrompt: string): string {
+  return withUserPrompt(MATCH_SYSTEM, userPrompt)
+}
+
+export interface PromptOptions {
+  /** 用户自定义提示词；留空（或只有空白）表示只按内置要求 */
   userPrompt?: string
 }
 
@@ -171,6 +200,7 @@ export async function matchJob(
   resume: Resume,
   job: JobSummary,
   jdText: string,
+  opts: PromptOptions = {},
 ): Promise<MatchResult> {
   const provider = makeProvider(settings)
 
@@ -197,7 +227,7 @@ export async function matchJob(
   ].filter(Boolean).join('\n')
 
   const raw = await requestJson<unknown>(provider, {
-    system: MATCH_SYSTEM,
+    system: buildMatchSystem(opts.userPrompt ?? ''),
     user,
     schemaHint: MATCH_SCHEMA_HINT,
   })
@@ -255,21 +285,12 @@ export function normalizeGreeting(raw: unknown): GreetingResult {
 }
 
 /**
- * 组装招呼语生成的 system prompt。
+ * 招呼语生成用的 system prompt（含用户自定义规则）。
  *
- * 用户自定义规则单独成段并声明优先级，避免与上面的通用要求混在一起时
- * 被模型当成「建议」而忽略。冲突时以用户规则为准 —— 那是他明确的意图。
+ * 与 buildMatchSystem 共用拼装逻辑，见上面的 withUserPrompt。
  */
-function buildGreetingSystem(userPrompt: string): string {
-  const custom = userPrompt.trim()
-  if (!custom)
-    return GREETING_SYSTEM
-
-  return `${GREETING_SYSTEM}
-
-## 用户的额外要求（优先级最高）
-以下要求由用户指定，请严格遵循。若与上面的通用要求冲突，以本节为准：
-${custom}`
+export function buildGreetingSystem(userPrompt: string): string {
+  return withUserPrompt(GREETING_SYSTEM, userPrompt)
 }
 
 export async function generateGreeting(
@@ -278,7 +299,7 @@ export async function generateGreeting(
   job: JobSummary,
   jdText: string,
   match: MatchResult | null,
-  opts: MatchOptions = {},
+  opts: PromptOptions = {},
 ): Promise<GreetingResult> {
   const provider = makeProvider(settings)
   const input = fitInputs(provider, resume.markdown, jdText)

@@ -9,7 +9,7 @@ import { createDefaultAiSettings, createEmptyResume } from '~/logic/types'
  * 侧边栏的快捷设置。
  *
  * 定位：只放**当前会话里要确认一眼**的东西 —— 两项就绪状态与连通性测试，
- * 以及通往设置页的入口。简历、API Key、平台选择、招呼语提示词这类
+ * 以及通往设置页的入口。简历、API Key、平台选择、提示词这类
  * 「配一次就不动」的内容都在设置页。
  *
  * 曾经这里还有个「匹配阈值」滑块，那是自动流程的产物（低于阈值就跳过岗位）。
@@ -113,7 +113,7 @@ function openOptions() {
     </button>
 
     <p class="mt-2 text-gray-400">
-      简历、API Key、平台与招呼语提示词都在设置页。
+      简历、API Key、平台与提示词都在设置页。
     </p>
   </div>
 </template>

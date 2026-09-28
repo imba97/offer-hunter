@@ -17,7 +17,7 @@ test('options page', async ({ page, extensionId }) => {
   await expect(page.locator('img')).toHaveAttribute('alt', 'Offer Hunter')
   // 三个标签都在，说明 Vue 应用挂载成功
   await expect(page.getByRole('button', { name: '简历', exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: '打招呼', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '提示词', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'AI 平台', exact: true })).toBeVisible()
 })
 

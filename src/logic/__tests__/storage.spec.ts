@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { mergeDefaults, stripRemovedRecordFields } from '../storage'
 import {
   createDefaultAiSettings,
-  createDefaultMatchingSettings,
+  createDefaultPromptSettings,
   createEmptyGistSource,
   createEmptyResume,
   normalizeResumeSource,
@@ -70,11 +70,13 @@ describe('mergeDefaults', () => {
     })
   })
 
-  it('把早期被 JSON 字符串化的数据还原成对象', () => {
+  it('把早期被 JSON 字符串化的数据还原成对象，并补上新增的提示词字段', () => {
+    // 这条数据是「提示词只有招呼语那一段」那个版本的形状（存储键当时叫 matching）
     const legacy = JSON.stringify({ greetingPrompt: '开头用您好' })
-    const merged = mergeDefaults(legacy, createDefaultMatchingSettings())
+    const merged = mergeDefaults(legacy, createDefaultPromptSettings())
 
-    expect(merged).toEqual({ greetingPrompt: '开头用您好' })
+    // 写过的招呼语不许丢，新加的匹配度分析提示词补成空串
+    expect(merged).toEqual({ matchPrompt: '', greetingPrompt: '开头用您好' })
   })
 
   it('字符串不是对象时不解析（避免把普通文本当成 JSON）', () => {

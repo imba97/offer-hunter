@@ -118,19 +118,30 @@ export function normalizeResumeSource(value: unknown): ResumeSourceId {
 }
 
 // ---------------------------------------------------------------------------
-// 招呼语生成配置（用户自己配，不设默认值）
+// 提示词（用户自己配，不设默认值）
 // ---------------------------------------------------------------------------
 
 /**
- * 只剩「招呼语怎么写」这一件事。
+ * 用户自写的两段提示词，各自拼进对应那一轮的 system prompt。
+ *
+ * 分成两个字段而不是一段公用文本：打分与写作是两次独立的调用，想要的约束也
+ * 完全不同（前者是评判口径，后者是文风与篇幅）。一段文本没法同时说清这两件事，
+ * 硬塞进去只会让两边的提示词互相干扰。
  *
  * 原本这里还有个「匹配度阈值」，唯一作用是自动流程里判定「分数不够就跳过
  * 这个岗位」。自动化移除后它不参与任何逻辑（分数配色另有 85 / 75 / 60 的固定
  * 分档），留着只会让人以为它在管着什么，所以一并删掉。
  */
-export interface MatchingSettings {
+export interface PromptSettings {
   /**
-   * 生成招呼语时的自定义规则，会拼进生成用的 system prompt。
+   * 匹配度分析的额外评判口径，会拼进分析用的 system prompt。
+   *
+   * 例：「更看重高并发经验」「有开源贡献可以加分」「不看学历」。
+   * 留空表示只按内置的评判原则打分。
+   */
+  matchPrompt: string
+  /**
+   * 生成招呼语的额外规则，会拼进生成用的 system prompt。
    *
    * 例：「开头使用「您好」」「不要提到薪资」「突出我的开源经历」。
    * 留空表示不加额外约束。
@@ -138,8 +149,9 @@ export interface MatchingSettings {
   greetingPrompt: string
 }
 
-export function createDefaultMatchingSettings(): MatchingSettings {
+export function createDefaultPromptSettings(): PromptSettings {
   return {
+    matchPrompt: '',
     greetingPrompt: '',
   }
 }

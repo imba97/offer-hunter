@@ -1,21 +1,22 @@
 <script setup lang="ts">
-import type { AiPlatformName, AiSettings, MatchingSettings, Resume, ResumeSourceId } from '~/logic/types'
+import type { AiPlatformName, AiSettings, PromptSettings, Resume, ResumeSourceId } from '~/logic/types'
 import { computed, defineAsyncComponent, defineComponent, h, ref } from 'vue'
 import logo from '~/assets/logo.png'
 import GistPicker from '~/components/GistPicker.vue'
+import PromptField from '~/components/PromptField.vue'
 import ScrollArea from '~/components/ScrollArea.vue'
 import { callBackground } from '~/logic/messaging'
 import { resetAllStorage, STORAGE_KEYS, useStoredValue } from '~/logic/storage'
 import {
   createDefaultAiSettings,
-  createDefaultMatchingSettings,
+  createDefaultPromptSettings,
   createEmptyResume,
   normalizeResumeSource,
 } from '~/logic/types'
 import { AI_PLATFORM_OPTIONS } from '~/platform/ai/platforms'
 
 /**
- * 设置页：简历维护 + 打招呼规则 + AI 平台配置。
+ * 设置页：简历维护 + 提示词 + AI 平台配置。
  *
  * 独立标签页打开，空间充足（侧边栏太窄，放不下编辑器与完整表单）。
  * 简历有两种来源：直接在编辑器里写（手动输入），或从一个 GitHub Gist 同步
@@ -45,11 +46,11 @@ const MarkdownEditor = defineAsyncComponent({
 const ai = useStoredValue<AiSettings>(STORAGE_KEYS.ai, createDefaultAiSettings)
 const resume = useStoredValue<Resume>(STORAGE_KEYS.resume, createEmptyResume)
 
-const tab = ref<'resume' | 'greeting' | 'ai'>('resume')
+const tab = ref<'resume' | 'prompt' | 'ai'>('resume')
 
-const matching = useStoredValue<MatchingSettings>(
-  STORAGE_KEYS.matching,
-  createDefaultMatchingSettings,
+const prompts = useStoredValue<PromptSettings>(
+  STORAGE_KEYS.prompts,
+  createDefaultPromptSettings,
 )
 
 /**
@@ -208,7 +209,7 @@ async function clearAllData() {
         <button
           v-for="t in ([
             ['resume', '简历'],
-            ['greeting', '打招呼'],
+            ['prompt', '提示词'],
             ['ai', 'AI 平台'],
           ] as const)"
           :key="t[0]"
@@ -269,34 +270,32 @@ async function clearAllData() {
         </p>
       </section>
 
-      <!-- 打招呼 -->
-      <section v-else-if="tab === 'greeting'" class="space-y-6">
-        <div class="space-y-3 rounded-lg bg-white p-6 shadow-sm">
-          <label class="block">
-            <span class="mb-1 flex items-center justify-between text-sm text-gray-600">
-              <span>打招呼语提示词</span>
-              <button
-                v-if="matching.greetingPrompt"
-                class="text-xs text-gray-400 hover:text-gray-600"
-                @click="matching.greetingPrompt = ''"
-              >
-                清空
-              </button>
-            </span>
-            <!--
-              提示词会长到十几行：固定高度 + 内部滚动，比让 textarea 自己撑高更可控。
-              `resize-none` 是因为拖拽手柄与自绘滚动条会挤在同一个角上。
-            -->
-            <ScrollArea class="oh-prompt h-44" scroller-class="oh-prompt-pad">
-              <textarea
-                v-model="matching.greetingPrompt"
-                class="oh-prompt-input font-mono text-xs leading-relaxed"
-                placeholder="自定义生成规则，每行一条，例如：&#10;开头使用「您好」&#10;突出我的开源经历&#10;控制在 80 字以内"
-              />
-            </ScrollArea>
-          </label>
+      <!-- 提示词 -->
+      <section v-else-if="tab === 'prompt'" class="space-y-6">
+        <div class="space-y-5 rounded-lg bg-white p-6 shadow-sm">
+          <PromptField
+            v-model="prompts.matchPrompt"
+            title="匹配度分析提示词"
+            placeholder="自定义打分口径，每行一条，例如：&#10;更看重高并发与性能优化经验&#10;有开源贡献可以加分&#10;不看学历"
+          >
+            <template #hint>
+              会追加到匹配分析的提示词里，<strong>优先级高于默认的评判原则</strong>；留空表示只按内置原则打分。
+            </template>
+          </PromptField>
+
+          <PromptField
+            v-model="prompts.greetingPrompt"
+            title="打招呼语提示词"
+            placeholder="自定义生成规则，每行一条，例如：&#10;开头使用「您好」&#10;突出我的开源经历&#10;控制在 80 字以内"
+          >
+            <template #hint>
+              会追加到招呼语生成的提示词里，<strong>优先级高于默认的写作要求</strong>；留空表示只按内置写法生成。
+            </template>
+          </PromptField>
+
           <p class="text-xs text-gray-400">
-            会追加到生成提示词里，<strong>优先级高于默认要求</strong>；留空表示不加额外约束。
+            两段提示词各管一次 AI 调用：分析只看打分口径，招呼语只看写作规则，互不影响；
+            改动立即生效，已分析过的岗位要重新点一次分析才会用上新口径。
           </p>
         </div>
 
@@ -417,7 +416,7 @@ async function clearAllData() {
             清空本地数据
           </h3>
           <p class="mt-1 text-xs text-red-700/80">
-            删除简历、API Key、平台配置与岗位账本；BOSS 登录状态不受影响。
+            删除简历、提示词、API Key、平台配置与岗位账本；BOSS 登录状态不受影响。
           </p>
           <div class="mt-3 flex items-center gap-3">
             <button
@@ -461,50 +460,6 @@ async function clearAllData() {
 .oh-input:focus {
   border-color: #0d9488;
   box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.15);
-}
-/*
-  提示词输入框：滚动交给 ScrollArea，textarea 自身只填满那块可视区。
-  内边距放在滚动层上（而不是 textarea 上），否则文字会相对其它输入框缩进一格。
-
-  ⚠ 内边距必须用 `:deep()` 打进去：`scrollerClass` 是给 ScrollArea **内部**那个滚动层加的，
-  而它带的是 ScrollArea 自己的 scoped hash，本文件里普通的 `.oh-prompt-pad` 选择器
-  （会编译成 `.oh-prompt-pad[data-v-本文件]`）永远匹配不上 —— 表现为 padding 直接消失。
-  见 components/README.md 的「scrollerClass 的两条限制」。
-*/
-.oh-prompt {
-  border: 1px solid #d1d5db;
-  border-radius: 0.375rem;
-  background: #fff;
-  transition: border-color 0.15s, box-shadow 0.15s;
-}
-.oh-prompt:focus-within {
-  border-color: #0d9488;
-  box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.15);
-}
-.oh-prompt :deep(.oh-prompt-pad) {
-  padding: 0.4rem 0.6rem;
-}
-/*
-  输入框自身**不滚动**：内容再长也让它长高，由外面的 ScrollArea 统一滚。
-  否则会出现两个滚动条（textarea 的原生条 + 自绘条），而 textarea 那条没法套我们的样式。
-
-  ⚠ 不要给 `max-height`：撞上它的那一刻就变成「内部裁掉、且连系统滚动条都没有」，
-  用户写的后文会**静默消失**。高度上限交给外层 ScrollArea，这里只负责长高。
-  `field-sizing: content` 是长高的首选；不支持它的浏览器由 `overflow-y: auto` 兜底，
-  此时用的是系统滚动条，观感差一点但不会丢内容。
-*/
-.oh-prompt-input {
-  field-sizing: content;
-  display: block;
-  box-sizing: border-box;
-  width: 100%;
-  min-height: 100%;
-  overflow-y: auto;
-  border: none;
-  padding: 0;
-  background: transparent;
-  outline: none;
-  resize: none;
 }
 .oh-btn-primary {
   background: #0d9488;

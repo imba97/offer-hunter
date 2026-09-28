@@ -2,14 +2,14 @@ import type { Ref } from 'vue'
 import type {
   AiSettings,
   JobRecord,
-  MatchingSettings,
+  PromptSettings,
   Resume,
 } from './types'
 import { getCurrentScope, onScopeDispose, ref, watch } from 'vue'
 import { storage } from 'webextension-polyfill'
 import {
   createDefaultAiSettings,
-  createDefaultMatchingSettings,
+  createDefaultPromptSettings,
   createEmptyResume,
 } from './types'
 
@@ -29,13 +29,17 @@ import {
 
 const KEY_AI = 'offer-hunter-ai'
 const KEY_RESUME = 'offer-hunter-resume'
-const KEY_MATCHING = 'offer-hunter-matching'
+/**
+ * ⚠ 键名沿用 `offer-hunter-matching`：这个键从「打招呼规则」时代就在用，改名等于
+ * 把存量用户写过的招呼语提示词丢掉（只有改键名才会读不到，值的形状由 mergeDefaults 补）。
+ */
+const KEY_PROMPTS = 'offer-hunter-matching'
 const KEY_RECORDS = 'offer-hunter-records'
 
 export const STORAGE_KEYS = {
   ai: KEY_AI,
   resume: KEY_RESUME,
-  matching: KEY_MATCHING,
+  prompts: KEY_PROMPTS,
   records: KEY_RECORDS,
 } as const
 
@@ -138,15 +142,15 @@ export function writeResume(value: Resume): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// 招呼语生成配置
+// 提示词
 // ---------------------------------------------------------------------------
 
-export function readMatchingSettings(): Promise<MatchingSettings> {
-  return read<MatchingSettings>(KEY_MATCHING, createDefaultMatchingSettings())
+export function readPromptSettings(): Promise<PromptSettings> {
+  return read<PromptSettings>(KEY_PROMPTS, createDefaultPromptSettings())
 }
 
-export function writeMatchingSettings(value: MatchingSettings): Promise<void> {
-  return storage.local.set({ [KEY_MATCHING]: value })
+export function writePromptSettings(value: PromptSettings): Promise<void> {
+  return storage.local.set({ [KEY_PROMPTS]: value })
 }
 
 // ---------------------------------------------------------------------------
@@ -345,7 +349,7 @@ export function stripRemovedRecordFields(all: Record<string, JobRecord>): boolea
  * 迁移是幂等的：第二次运行会因为 JSON 完全一致而跳过写入。
  */
 export async function ensureStorageDefaults(): Promise<void> {
-  const keys = [KEY_AI, KEY_RESUME, KEY_MATCHING, KEY_RECORDS]
+  const keys = [KEY_AI, KEY_RESUME, KEY_PROMPTS, KEY_RECORDS]
 
   let existing: Record<string, unknown>
   try {
@@ -366,9 +370,9 @@ export async function ensureStorageDefaults(): Promise<void> {
   if (JSON.stringify(resume) !== JSON.stringify(existing[KEY_RESUME]))
     patch[KEY_RESUME] = resume
 
-  const matching = mergeDefaults(existing[KEY_MATCHING], createDefaultMatchingSettings())
-  if (JSON.stringify(matching) !== JSON.stringify(existing[KEY_MATCHING]))
-    patch[KEY_MATCHING] = matching
+  const prompts = mergeDefaults(existing[KEY_PROMPTS], createDefaultPromptSettings())
+  if (JSON.stringify(prompts) !== JSON.stringify(existing[KEY_PROMPTS]))
+    patch[KEY_PROMPTS] = prompts
 
   // 账本：既要兼容历史上被字符串化的数据，也要抹掉已删除的字段
   const recordsNeedWrite = existing[KEY_RECORDS] === undefined
@@ -391,6 +395,6 @@ export async function ensureStorageDefaults(): Promise<void> {
 
 /** 清空所有扩展数据（供设置页的「重置」使用） */
 export async function resetAllStorage(): Promise<void> {
-  await storage.local.remove([KEY_AI, KEY_RESUME, KEY_MATCHING, KEY_RECORDS])
+  await storage.local.remove([KEY_AI, KEY_RESUME, KEY_PROMPTS, KEY_RECORDS])
   await ensureStorageDefaults()
 }

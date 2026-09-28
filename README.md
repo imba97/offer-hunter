@@ -21,7 +21,7 @@ job JD (the one you clicked) ─────┴──> AI match score ──> op
 
 ## Features
 
-- 🎯 **Match scoring** — your resume against the JD, scored 0–100 with the hits and the missing skills.
+- 🎯 **Match scoring** — your resume against the JD, scored 0–100 with the hits and the missing skills; the scoring criteria are yours to write.
 - ✍️ **Tailored openers** — drawn from your real experience, with your own rules taking priority.
 - 📄 **Resume from a Gist** — paste a link or id and it syncs; secret gists included, no token needed.
 - 📋 **Copy, never send** — sending stays your click.
@@ -82,7 +82,7 @@ Read this before installing — it is the most important boundary of the project
 - **Credentials sit unencrypted on this machine.** The API key (and the optional Gist token) are stored in the browser's local extension data, readable by anyone who can read the browser profile; use a key with a spending cap.
 - **Data stays on your machine.** There is no backend service; apart from the AI endpoint you configured, nothing is sent anywhere.
 - **Narrow permissions.** Host access is limited to `zhipin.com`, so the extension cannot read any other site you visit.
-- **You can clear everything.** Options page → AI platforms → clear local data removes the resume, API key, platform settings and the job ledger; uninstalling does the same.
+- **You can clear everything.** Options page → AI platforms → clear local data removes the resume, prompts, API key, platform settings and the job ledger; uninstalling does the same.
 
 ## Design boundaries
 

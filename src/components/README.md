@@ -63,7 +63,8 @@ It will only bundle the icons you use. Check out [unplugin-icons](https://unplug
 </style>
 ```
 
-（ScrollArea 自己 `<style scoped>` 里定义的 `.oh-scroll-*` 不受影响，它就在同一个组件内。）
+（ScrollArea 自己 `<style scoped>` 里定义的 `.oh-scroll-*` 不受影响，它就在同一个组件内。
+真实的例子见 `PromptField.vue`，下面那段示例就是从它抄出来的。）
 
 #### 必须给根节点一个高度
 
@@ -118,3 +119,19 @@ It will only bundle the icons you use. Check out [unplugin-icons](https://unplug
   内部那层实测会铺满根节点的 border box（见「必须给根节点一个高度」上面的说明）。
 - 双击、键盘滚动等原生行为不受影响：滚动仍然由那一层的 `overflow: auto` 承担，
   自绘的只是「看起来的样子」。`scrollIntoView`、锚点跳转也都正常。
+
+### PromptField
+
+`PromptField.vue` —— 设置页里一段自定义提示词的输入框（标题 + 固定高度的多行框 +
+右上角「清空」+ 说明插槽）。**设置页的提示词都用它**，不要再手写一份 ScrollArea +
+textarea：各写一份的结果是高度、padding、清空按钮的行为各走各的（提示词框的
+padding 就这么丢过一次，见上）。
+
+| prop / 插槽 | 说明 |
+| --- | --- |
+| `v-model` | 提示词的文本内容（`required`） |
+| `title` | 输入框上方的字段名 |
+| `placeholder` | 空状态下的示例写法 |
+| `#hint` | 框下方的说明文字；**各字段要说的不一样**（拼进哪一轮提示词、优先级如何），所以交给调用方 |
+
+框高固定 `h-44`，内容超长由内部的 ScrollArea 滚；`textarea` 本身只负责长高（见上一节）。

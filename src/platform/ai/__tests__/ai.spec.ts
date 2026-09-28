@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildGreetingSystem,
+  buildMatchSystem,
   fitInputs,
   normalizeGreeting,
   normalizeMatchResult,
@@ -115,6 +117,37 @@ describe('normalizeGreeting', () => {
 
   it('没有正文时明确报错', () => {
     expect(() => normalizeGreeting({ rationale: '只有理由' })).toThrow('没有返回招呼语内容')
+  })
+})
+
+/**
+ * 自定义提示词的拼装。
+ *
+ * 用户写的东西必须真的进到那一轮的 prompt 里，而且不能被当成「仅供参考」——
+ * 判据是它单独成段并声明了优先级。两段提示词走同一条路径，所以这里对
+ * buildMatchSystem / buildGreetingSystem 各断言一遍。
+ */
+describe('自定义提示词的拼装', () => {
+  it('没有自定义提示词时就是内置提示词', () => {
+    expect(buildMatchSystem('')).toBe(buildMatchSystem('  \n '))
+    expect(buildGreetingSystem('')).toBe(buildGreetingSystem('  \n '))
+    expect(buildMatchSystem('')).not.toContain('用户的额外要求')
+  })
+
+  it('拼接时保留内置要求，并把用户那段标成优先级最高', () => {
+    const base = buildMatchSystem('')
+    const custom = buildMatchSystem('更看重高并发经验')
+
+    expect(custom.startsWith(base)).toBe(true)
+    expect(custom).toContain('优先级最高')
+    expect(custom).toContain('更看重高并发经验')
+  })
+
+  it('招呼语与匹配度分析各走各的提示词，互不串味', () => {
+    const greeting = buildGreetingSystem('开头用您好')
+
+    expect(greeting).toContain('开头用您好')
+    expect(greeting).not.toContain('技术招聘顾问')
   })
 })
 

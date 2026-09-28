@@ -5,7 +5,7 @@ import { broadcastToPages, handleBackgroundRequests } from '~/logic/messaging'
 import {
   ensureStorageDefaults,
   readAiSettings,
-  readMatchingSettings,
+  readPromptSettings,
   readRecords,
   readResume,
   upsertRecord,
@@ -180,8 +180,19 @@ async function onAiTest() {
 
 async function onAiMatch(data: { job: JobSummary, jdText: string }) {
   try {
-    const [settings, resume] = await Promise.all([readAiSettings(), readResume()])
-    const result = await matchJob(settings, resume, data.job, data.jdText)
+    const [settings, resume, prompts] = await Promise.all([
+      readAiSettings(),
+      readResume(),
+      readPromptSettings(),
+    ])
+    const result = await matchJob(
+      settings,
+      resume,
+      data.job,
+      data.jdText,
+      // 用户在设置里自定义的打分口径
+      { userPrompt: prompts.matchPrompt },
+    )
     return { ok: true as const, data: result }
   }
   catch (error) {
@@ -191,10 +202,10 @@ async function onAiMatch(data: { job: JobSummary, jdText: string }) {
 
 async function onAiGreeting(data: { job: JobSummary, jdText: string, match?: MatchResult | null }) {
   try {
-    const [settings, resume, matching] = await Promise.all([
+    const [settings, resume, prompts] = await Promise.all([
       readAiSettings(),
       readResume(),
-      readMatchingSettings(),
+      readPromptSettings(),
     ])
     const result = await generateGreeting(
       settings,
@@ -204,7 +215,7 @@ async function onAiGreeting(data: { job: JobSummary, jdText: string, match?: Mat
       // 带上匹配结论（若已分析过），让招呼语更贴合
       data.match ?? null,
       // 用户在设置里自定义的招呼语生成规则
-      { userPrompt: matching.greetingPrompt },
+      { userPrompt: prompts.greetingPrompt },
     )
     return { ok: true as const, data: result }
   }
