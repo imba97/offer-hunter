@@ -151,7 +151,7 @@ async function clearAllData() {
     注意滚动条是「浮在内容之上」的，所以内容自带 `max-w-3xl` 居中 + 左右留白，
     不至于被它压住（设置页本来就有这层留白）。
   -->
-  <ScrollArea class="oh-page h-screen bg-gray-50 text-gray-800" scroller-class="px-6 py-10">
+  <ScrollArea class="h-screen bg-gray-50 text-gray-800" scroller-class="px-6 py-10">
     <div class="mx-auto max-w-3xl">
       <!-- 头部 -->
       <header class="mb-8 flex items-center gap-3">
@@ -434,6 +434,11 @@ async function clearAllData() {
 /*
   提示词输入框：滚动交给 ScrollArea，textarea 自身只填满那块可视区。
   内边距放在滚动层上（而不是 textarea 上），否则文字会相对其它输入框缩进一格。
+
+  ⚠ 内边距必须用 `:deep()` 打进去：`scrollerClass` 是给 ScrollArea **内部**那个滚动层加的，
+  而它带的是 ScrollArea 自己的 scoped hash，本文件里普通的 `.oh-prompt-pad` 选择器
+  （会编译成 `.oh-prompt-pad[data-v-本文件]`）永远匹配不上 —— 表现为 padding 直接消失。
+  见 components/README.md 的「scrollerClass 的两条限制」。
 */
 .oh-prompt {
   border: 1px solid #d1d5db;
@@ -445,7 +450,7 @@ async function clearAllData() {
   border-color: #0d9488;
   box-shadow: 0 0 0 2px rgba(13, 148, 136, 0.15);
 }
-.oh-prompt-pad {
+.oh-prompt :deep(.oh-prompt-pad) {
   padding: 0.4rem 0.6rem;
 }
 /*

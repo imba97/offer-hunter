@@ -147,9 +147,21 @@ const jdLines = computed(() => jdText.value.split('\n').filter(l => l.trim().len
       <!--
         JD 通常比面板长得多，这里限高 + 内部滚动。
         滚动条由 ScrollArea 自绘（原生滚动条会占宽，把文字挤窄、还会随内容长短抽动）。
-        `pr-3` 是把滚动条的位置让出来，否则它会浮在文字上。
+
+        ⚠ `max-h-64` 只给上限，**不给高度**：ScrollArea 内部那层是绝对定位，撑不出高度，
+        只有 max-height 时它就塌成 1px（文字只剩半行，踩过）。所以再用 `min-h-40` 定个下限，
+        内容比它长就滚、比它短就是这个高度。
+
+        ⚠ 右侧留白必须加在**滚动层**上（内部那一层），不能加在根节点：
+        内部那层是 `inset: 0` 绝对定位的，实测会铺满根节点的 border box，
+        根节点上的 `pr-*` 一点都换不来让位空间 —— 文字末尾会被滚动条压住约 7px。
+        而给滚动层加 padding 只能用 `:deep()`（`scrollerClass` 传本文件的 scoped 类名不会生效，
+        它带的是 ScrollArea 自己的 hash），见 components/README.md。
       -->
-      <ScrollArea v-if="showJd" class="max-h-64 border-t border-gray-100 px-3" scroller-class="py-2">
+      <ScrollArea
+        v-if="showJd"
+        class="oh-jd max-h-64 min-h-40 border-t border-gray-100"
+      >
         <p v-if="!jdLines.length" class="text-xs text-gray-400">
           没有读到 JD 内容
         </p>
@@ -217,6 +229,14 @@ const jdLines = computed(() => jdText.value.split('\n').filter(l => l.trim().len
 </template>
 
 <style scoped>
+/*
+  JD 文本层：左右留白加在这里（而不是根节点），理由见模板里的注释。
+  `pr` 取 16px：滚动条实际画在距右边缘 3–9px 处，16px 留白能让每行文字都躲开它。
+*/
+.oh-jd :deep(.oh-scroll-viewport) {
+  padding: 0.5rem 1rem 0.5rem 0.75rem;
+}
+
 .oh-btn {
   padding: 0.35rem 0.75rem;
   border: 1px solid #d1d5db;

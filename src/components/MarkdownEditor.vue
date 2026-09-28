@@ -40,26 +40,6 @@ const host = ref<HTMLDivElement | null>(null)
 const status = ref('正在加载编辑器…')
 const failed = ref(false)
 
-/**
- * Monaco 只认自己的主题色，不能共用 ScrollArea 那套 CSS，所以把滚动条颜色写进主题里。
- *
- * 三个色值刻意对齐 ScrollArea 的滑块（30% / 50% / 62% 的深灰）：
- * 同屏有两个滚动条时（设置页整体 + 编辑器），不该是两种东西。
- * 注意 Monaco 的颜色注册表要求 `#RRGGBBAA`，不认 `rgba()` 写法。
- */
-const EDITOR_THEME = 'vitesse-dark-oh'
-const editorTheme = {
-  ...vitesseDark,
-  name: EDITOR_THEME,
-  colors: {
-    ...vitesseDark.colors,
-    'scrollbar.shadow': '#00000000',
-    'scrollbarSlider.background': '#1118274d',
-    'scrollbarSlider.hoverBackground': '#11182780',
-    'scrollbarSlider.activeBackground': '#1118279e',
-  },
-}
-
 // Monaco 实例不需要深层响应式
 const editor = shallowRef<monaco.editor.IStandaloneCodeEditor | null>(null)
 
@@ -77,7 +57,7 @@ async function initEditor(): Promise<void> {
   status.value = '正在加载语法高亮…'
 
   const highlighter = await createHighlighterCore({
-    themes: [editorTheme],
+    themes: [vitesseDark],
     langs: [markdown],
     engine: createJavaScriptRegexEngine(),
   })
@@ -93,9 +73,14 @@ async function initEditor(): Promise<void> {
   editor.value = monaco.editor.create(host.value, {
     value: props.modelValue,
     language: 'markdown',
-    theme: EDITOR_THEME,
+    theme: 'vitesse-dark',
     automaticLayout: true,
-    minimap: { enabled: false },
+    /*
+      缩略图开着：Markdown 常常几百行，有一张全局缩略图才好跳。
+      代价是右侧约 100px 的宽度，设置页有 3xl 的余量，够用。
+      它同时也承担了「文档整体进度」的提示，不必再为了看长文档去拖滚动条。
+    */
+    minimap: { enabled: true },
     fontSize: 12.5,
     lineHeight: 20,
     fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace',
@@ -169,20 +154,12 @@ onBeforeUnmount(() => {
   width: 100%;
 }
 /*
-  Monaco 自绘不了「半透明」以外的效果（它的滑块本来就是原生的），
-  这里只补一条：悬停滑块时加粗一点，跟 ScrollArea 的观感对上。
-  颜色不在这里写 —— 走主题里的 scrollbarSlider.*（见 EDITOR_THEME）。
+  Monaco 的滚动条（DOM + canvas 自绘的 `.slider`）保持它自己的默认样式与尺寸，
+  不在这里覆盖，也不改主题里的 `scrollbarSlider.*`。
 
-  ⚠ 只能改 `.vertical`：水平滑块靠 `width` 占位（构建产物里它本来是 650px），
-  把它一起改成 8px 会让水平条绘制位置错乱；垂直滑块才是靠 `height` 定位。
+  理由：Monaco 那套滚动条跟 ScrollArea 是两种东西（它的滑块是画出来的，还能在
+  缩略图里显示进度），强行统一只会两头不像。同屏两个滚动条观感不同是可接受的。
 */
-.oh-editor-wrap :deep(.monaco-scrollbar.vertical > .slider) {
-  width: 8px;
-  transition: width 0.15s ease, left 0.15s ease, top 0.15s ease;
-}
-.oh-editor-wrap :deep(.monaco-scrollbar.vertical > .slider:hover) {
-  width: 10px;
-}
 .oh-editor-status {
   position: absolute;
   inset: 0;
