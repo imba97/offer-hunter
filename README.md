@@ -20,7 +20,7 @@ Scores how well your resume matches a job posting on BOSS Zhipin, then drafts a 
 - ✍️ **Tailored openers** — an opening message drawn from your real experience, with your own rules taking priority over the built-in ones.
 - 📋 **Copy, never send** — the opener goes to your clipboard; sending stays your click.
 - 🔌 **Your AI, your choice** — DeepSeek, OpenAI, Anthropic, Kimi, or a local model that keeps your resume on your machine.
-- 🧾 **Local job ledger** — jobs you already handled are recorded, so nothing is analysed or greeted twice.
+- 🧾 **Local job ledger** — the score and the opener for each posting are kept on your machine, so returning to a job does not mean paying for the same analysis twice.
 - 🧭 **Out of the page's way** — the UI lives in the browser's side panel and injects nothing into the BOSS page.
 - 🩺 **Built-in diagnostics** — one click re-verifies the page selectors and API contract, so a site change tells you exactly what broke.
 
@@ -28,16 +28,14 @@ Scores how well your resume matches a job posting on BOSS Zhipin, then drafts a 
 
 ```text
 resume (Markdown) ──┐
-job JD (captured) ──┴──> AI match score
-                            ├──> below threshold ──> skipped, move on
-                            └──> at/above threshold ──> opener ──> copy, you send
+job JD (captured) ──┴──> AI match score ──> opener ──> copy, you send
 ```
 
 1. **You keep one resume as Markdown.** It is written and stored locally in the extension's options page.
 2. **You open a job on BOSS.** The extension captures that one posting — never the list, never a queue, never anything you did not click.
 3. **You ask for a match analysis.** The request goes through the background service worker to your AI platform, with the resume and the JD together.
-4. **You get a number and a reason.** Score, verdict, hit points and missing skills land in the side panel, and the result is written to the local ledger.
-5. **If the score clears your threshold, you generate an opener.** You copy it and paste it into the chat yourself.
+4. **You get a number and a reason.** Score, hit points and missing skills land in the side panel, and the result is written to the local ledger.
+5. **You decide what happens next.** There is no threshold and no queue: generate an opener for the jobs worth it, then copy it and paste it into the chat yourself.
 
 ## Install
 
@@ -74,14 +72,14 @@ There is no store link in this repository yet, so use one of the options above.
 
 1. **Configure an AI platform.** Open the options page, pick a provider, paste an API key, and press **Test connection**. The test reports the resolved provider, model and latency, so a wrong base URL, key or model name is caught here rather than in the middle of a job search.
 2. **Paste your resume.** The options page has a Markdown editor with syntax highlighting and undo history. Content saves as you type; length and last-updated time are shown next to it.
-3. **Set your threshold and your rules.** The threshold decides when an opener is suggested. The greeting rules box is free-form — anything you put there is appended to the generation prompt with the highest priority.
+3. **Set your rules for the opener.** The greeting rules box is free-form — anything you put there is appended to the generation prompt with the highest priority.
 4. **Browse jobs normally.** Click any posting on the BOSS jobs page, open the side panel, and the job appears there. Then:
 
    - **Match analysis** — score the job against your resume
    - **Generate opener** — available whether or not you analysed first; the match result just makes it sharper
    - **Copy** — puts the message on your clipboard for you to paste
 
-The side panel also has a **Diagnostics** tab for verifying that page capture still works, and a **Settings** tab for the two things you reach for mid-session: the threshold and a connection test.
+The side panel also has a **Diagnostics** tab for verifying that page capture still works, and a **Settings** tab for the two things you reach for mid-session: whether your resume and API key are in place, and a connection test.
 
 ## Supported AI platforms
 
