@@ -1,7 +1,7 @@
 {
   "name": "offer-hunter",
   "displayName": "Offer Hunter",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "private": true,
   "packageManager": "pnpm@11.17.0",
   "description": "在 BOSS 直聘上用 AI 分析简历与 JD 的匹配度，并按你的规则生成定制打招呼语（复制后由你本人发送）。",
