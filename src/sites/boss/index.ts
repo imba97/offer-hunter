@@ -76,20 +76,32 @@ export const bossSite: ApiJobSiteAdapter = {
   /**
    * 是否同一个岗位。
    *
-   * 优先用 URL 上的 securityId（详情页地址就带着它）；拿不到时退回文本比对 ——
-   * 接口 JD（postDescription）与 DOM 渲染出来的 JD 在换行/分段上未必一致，
-   * 因此用「互相包含」而不是相等。
+   * ⚠ securityId **不是**稳定标识（每次访问新签），所以这里不能拿它当判据：
+   *   顶多「token 相同 → 一定是同一个岗位」这种单向推断。真正可靠的是正文比对 ——
+   *   接口 JD 与 DOM 渲染出来的 JD 在换行/分段上未必一致，因此用「互相包含」
+   *   而不是相等。
    */
   sameJob(existing, jd) {
     const securityId = securityIdFromUrl(window.location.href)
-    if (securityId)
-      return securityId === existing.site.naturalKey
+    if (securityId && existing.site.ids?.securityId === securityId)
+      return true
     if (!existing.jdText)
       return true
     return jd.includes(existing.jdText) || existing.jdText.includes(jd)
   },
 
-  emptyRef: (naturalKey): SiteRef => ({ siteId: 'boss', naturalKey }),
+  /**
+   * ⚠ 与接口路径同一个道理（见 api.ts 里 toJobView 的说明）：传进来的 key 是
+   * **每次访问新签的 securityId**，不是稳定身份。所以身份留空、交给 `jobIdentity`
+   * 按内容算摘要，token 存进 `ids` 供取数使用。
+   *
+   * eleduck 的同类实现把 key 当身份是对的 —— 那边是帖子 slug，本身稳定。
+   */
+  emptyRef: (fetchKey): SiteRef => ({
+    siteId: BOSS_SITE_ID,
+    naturalKey: '',
+    ids: { securityId: fetchKey },
+  }),
 
   diagnose(): SiteDiagnostic {
     const selectorList: Array<[string, string]> = [

@@ -133,7 +133,14 @@ describe('适配器（JOB_SITES）', () => {
     for (const site of JOB_SITES) {
       const ref = site.emptyRef('some-key')
       expect(ref.siteId).toBe(site.id)
-      expect(ref.naturalKey).toBe('some-key')
+      /*
+       * 传进去的 key 是「取数凭据」，不等于身份：BOSS 的 securityId 每次访问都新签，
+       * 拿它当身份会让同一个岗位每刷新一次就换个账本键（真机症状见 boss/__tests__/identity.spec.ts）。
+       * 所以只要求它**落在这份 ref 里**（哪里都行），不要求它一定占着 naturalKey。
+       */
+      const carried = ref.naturalKey === 'some-key'
+        || Object.values(ref.ids ?? {}).includes('some-key')
+      expect(carried, `${site.id} 的 emptyRef 把 key 丢了`).toBe(true)
     }
   })
 })

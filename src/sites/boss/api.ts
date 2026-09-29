@@ -115,9 +115,20 @@ export function toJobView(zpData: unknown, securityId: string): JobView | null {
     },
     site: {
       siteId: 'boss',
-      naturalKey: securityId,
+      /*
+       * ⚠ 故意**不**把 securityId 当身份，尽管它是详情接口的钥匙。
+       *
+       * 真机症状：同一个岗位每刷新一次就变成另一个 `boss:<一长串>`，刚存进账本的分析
+       * 结果再也查不到 —— 因为 BOSS **每次访问都会新签一个 securityId**，它不是岗位的
+       * 稳定标识，只是一次性的取数凭据。
+       *
+       * 所以身份留空，交给 `jobIdentity` 的内容摘要（标题 + JD 开头）兜底：那一份只
+       * 依赖岗位内容，跨刷新稳定。token 放进 `ids.securityId`，继续供重新取数与深链使用。
+       */
+      naturalKey: '',
       // BOSS 私有 id 原样留着：将来深链/刷新用得上，但上层不该读它们
       ids: {
+        securityId,
         encryptJobId: str(jobInfo.encryptJobId),
         encryptBossId: str(bossInfo.encryptBossId) || str(jobInfo.encryptBossId),
       },

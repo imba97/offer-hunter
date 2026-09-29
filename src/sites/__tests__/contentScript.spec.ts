@@ -270,13 +270,21 @@ describe('强制刷新', () => {
 
     pushApiResponse('sid-1', '资深后端工程师', '岗位职责：写代码')
     await vi.advanceTimersByTimeAsync(150)
-    expect((await currentJob())?.site.naturalKey).toBe('sid-1')
+    const before = (await currentJob())!
+    /*
+     * 内容脚本给出的视图里 `naturalKey` 留空、token 放在 `ids.securityId`：
+     * 身份是内容摘要，而摘要是**消费端**（面板、诊断）用 `jobIdentity` 算的 ——
+     * BOSS 的 securityId 每次访问都新签，当不了身份（见 boss/__tests__/identity.spec.ts）。
+     */
+    expect(before.site.naturalKey).toBe('')
+    expect(before.site.ids?.securityId).toBe('sid-1')
 
     // 用户在面板上点「刷新当前岗位」
     const refreshed = await currentJob(true)
 
-    // 标识沿用下来了 —— 否则账本里那份分析结果就再也查不回来
-    expect(refreshed?.site.naturalKey).toBe('sid-1')
+    // 取数凭据沿用下来了；身份由内容决定 —— DOM 兜底这条路会直接算出摘要
+    expect(refreshed?.site.ids?.securityId).toBe('sid-1')
+    expect(refreshed?.site.naturalKey).toMatch(/^~[0-9a-f]{16}$/)
     // 接口给的岗位名还在（DOM 里的标题是另一个，不该反向覆盖接口数据）
     expect(refreshed?.job.title).toBe('资深后端工程师')
     // 正文换成页面上更完整的那份
@@ -295,7 +303,8 @@ describe('强制刷新', () => {
     // 两条兜底路径必须给出同一个答案：观察器在同样情形下也是「保留接口数据」。
     // 降级的代价是把薪资/公司抹掉、并换掉身份，让已分析的结果变成孤儿。
     expect(refreshed?.source).toBe('api')
-    expect(refreshed?.site.naturalKey).toBe('sid-1')
+    expect(refreshed?.site.ids?.securityId).toBe('sid-1')
+    expect(refreshed?.site.naturalKey).toBe('')
     expect(refreshed?.job.title).toBe('资深后端工程师')
     expect(refreshed?.jdText).toBe('接口里的 JD 文案')
   })
@@ -306,7 +315,9 @@ describe('强制刷新', () => {
 
     pushApiResponse('sid-a', '岗位 A', '岗位 A 的 JD')
     await vi.advanceTimersByTimeAsync(150)
-    expect((await currentJob())?.site.naturalKey).toBe('sid-a')
+    const before = (await currentJob())!
+    expect(before.site.naturalKey).toBe('')
+    expect(before.site.ids?.securityId).toBe('sid-a')
 
     // 地址栏换成了另一个 securityId → 不是「认不出」，而是明确是另一个岗位
     vi.stubGlobal('location', {
@@ -316,7 +327,10 @@ describe('强制刷新', () => {
 
     const refreshed = await currentJob(true)
 
-    expect(refreshed?.site.naturalKey).toBe('sid-b')
+    // 地址上是另一个 token、正文也是另一个岗位 → DOM 兜底会按新内容算出一个新身份
+    expect(refreshed?.site.ids?.securityId).toBe('sid-b')
+    expect(refreshed?.site.naturalKey).toMatch(/^~[0-9a-f]{16}$/)
+    expect(refreshed?.site.naturalKey).not.toBe(before.site.naturalKey)
     expect(refreshed?.source).toBe('dom')
     expect(refreshed?.job.title).not.toBe('岗位 A')
   })
@@ -337,7 +351,7 @@ describe('切换岗位', () => {
     pushApiResponse('sid-b', '岗位 B', '岗位 B 的 JD')
     await vi.advanceTimersByTimeAsync(150)
 
-    expect((await currentJob())?.site.naturalKey).toBe('sid-b')
+    expect((await currentJob())?.site.ids?.securityId).toBe('sid-b')
     expect((await currentJob())?.job.title).toBe('岗位 B')
     // 推送必须真的发生，且带的是新岗位
     expect(lastPushedJob()?.job.title).toBe('岗位 B')
