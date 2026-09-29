@@ -187,10 +187,6 @@ export function get<T>(store: StoreName, key: IDBValidKey, ctx?: TxContext): Pro
   return withStore(store, 'readonly', os => requestToPromise<T | undefined>(os.get(key) as IDBRequest<T | undefined>), ctx)
 }
 
-export function getAll<T>(store: StoreName, ctx?: TxContext): Promise<T[]> {
-  return withStore(store, 'readonly', os => requestToPromise<T[]>(os.getAll() as IDBRequest<T[]>), ctx)
-}
-
 export function count(store: StoreName, ctx?: TxContext): Promise<number> {
   return withStore(store, 'readonly', os => requestToPromise<number>(os.count()), ctx)
 }

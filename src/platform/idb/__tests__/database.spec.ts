@@ -5,7 +5,6 @@ import {
   count,
   del,
   get,
-  getAll,
   getAllEntries,
   iterate,
   openDb,
@@ -115,7 +114,7 @@ describe('开库与 schema', () => {
 })
 
 describe('原语', () => {
-  it('内部键仓库：put / get / del / getAll / count', async () => {
+  it('内部键仓库：put / get / del / getAllEntries / count', async () => {
     await put('settings', { id: 'ai', value: { platform: 'deepseek' }, updatedAt: 'now' })
     await put('settings', { id: 'resume', value: { markdown: '# 我' }, updatedAt: 'now' })
 
@@ -123,7 +122,7 @@ describe('原语', () => {
       value: { platform: 'deepseek' },
     })
     expect(await count('settings')).toBe(2)
-    expect((await getAll<{ id: string }>('settings')).map(item => item.id).sort()).toEqual(['ai', 'resume'])
+    expect((await getAllEntries<{ id: string }>('settings')).map(entry => String(entry.key)).sort()).toEqual(['ai', 'resume'])
 
     await del('settings', 'ai')
     expect(await get('settings', 'ai')).toBeUndefined()

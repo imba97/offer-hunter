@@ -30,8 +30,9 @@ Select-String -Path src -Include *.ts,*.vue -Pattern 'TODO\(过渡代码\)' -Rec
 | 条目 | 位置 | 说明 |
 | --- | --- | --- |
 | 干跑预览与报告渲染 | `src/logic/store/legacy.ts` 的 `previewMigration` / `renderMigrationReport` / `PreviewEnvironment` / `readEnvironment` / `readIdbDatabases` / `readEstimate` / `describeSecret` / `fmtBytes` / `formatFieldCounts` | 原本服务于侧边栏的临时「迁移预览」tab，**那个 tab 已删**，所以这些现在只有单测在调用。留着是因为"迁移出问题时还能把它接回界面再跑一次" |
-| 原始数据导出 | `src/logic/store/legacy.ts` 的 `exportLegacySnapshot` | 同上，临时 tab 的按钮专用。**已无任何调用方**（保留在 git 历史里） |
 | 单条记录读取 | `src/logic/store/records.ts` 的 `readRecord` | 为决策 B（侧边栏按当前岗位读一条）准备的。若决策 B 最终不做，它就是死代码 |
+
+> `exportLegacySnapshot`（临时 tab 的"导出原始数据"按钮）**已经删除** —— 它当时已无任何调用方。需要那个功能时从 git 历史里取回。
 
 ### 第二批（确认存量数据不再出现之后）
 

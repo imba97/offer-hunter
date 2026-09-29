@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { previewMigration, runMigration } from '~/logic/store/legacy'
+import { planMigration, runMigration } from '~/logic/store/legacy'
 import { readAllRecords } from '~/logic/store/records'
 import { readRawSetting } from '~/logic/store/settings'
 import { closeDb, get } from '~/platform/idb/database'
@@ -95,6 +95,20 @@ function legacyData(): Record<string, unknown> {
   }
 }
 
+/** 同一份数据、换成 `planMigration` 要的短 id 形状（它不认 chrome 键名） */
+function legacyFixture(): Record<string, unknown> {
+  const toShortId: Record<string, string> = {
+    [AI_KEY]: 'ai',
+    [RESUME_KEY]: 'resume',
+    [MATCHING_KEY]: 'prompts',
+    [RECORDS_KEY]: 'records',
+  }
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(legacyData()))
+    out[toShortId[key] ?? key] = value
+  return out
+}
+
 async function resetEverything(): Promise<void> {
   closeDb()
   await new Promise<void>((resolve) => {
@@ -166,15 +180,16 @@ describe('runMigration：有存量数据', () => {
     expect(Object.keys(legacy.data)).toEqual([])
   })
 
-  it('迁移后的摘要与干跑报告一致（同一份数据、同一套算法）', async () => {
+  it('落库的摘要是按同一套算法算出来的（迁移前后自洽）', async () => {
     legacy.data = legacyData()
 
-    // 干跑（只读）先算出期望值
-    const { plan } = await previewMigration()
+    // 用同一份快照先算一遍期望值：planMigration 是纯函数，不碰库
+    const expected = planMigration({ values: legacyFixture() })
     await runMigration()
 
-    const meta = await get<{ value: { checksums: Record<string, string> } }>('meta', 'migration')
-    expect(meta?.value.checksums).toEqual(plan.checksums)
+    const meta = await get<{ value: { checksums: Record<string, string>, counts: { records: number } } }>('meta', 'migration')
+    expect(meta?.value.checksums).toEqual(expected.checksums)
+    expect(meta?.value.counts).toEqual(expected.counts)
   })
 })
 

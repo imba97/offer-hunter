@@ -1,7 +1,7 @@
 import type { JobRecord, Resume, ResumeSourceId } from '~/logic/types'
 import { RESUME_SOURCES } from '~/logic/resume-sources/registry'
 import { str } from '~/logic/strings'
-import { createEmptyResume, JOB_RECORD_FIELDS } from '~/logic/types'
+import { createEmptyResume } from '~/logic/types'
 
 /**
  * 存储层的**纯归一化逻辑**：没有任何 IO、不碰 storage、不依赖 Vue。
@@ -388,6 +388,3 @@ export function normalizeRecordLedger(raw: unknown): { value: Record<string, Job
 
   return { value, changed: needWrite || keysMigrated || shapeNormalized }
 }
-
-/** 账本记录的字段清单（供报告判断「哪些字段是模型外的」） */
-export const KNOWN_RECORD_FIELDS: readonly string[] = Object.keys(JOB_RECORD_FIELDS)
