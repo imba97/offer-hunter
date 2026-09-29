@@ -113,13 +113,57 @@ describe('订阅方', () => {
     expect(received).toEqual([])
   })
 
-  it('返回的取消订阅函数就是 onPageBroadcast 给的那个', () => {
+  it('返回的取消订阅函数要同时摘掉本地与远程两路', () => {
     const off = vi.fn()
     mocks.onPageBroadcast.mockReturnValue(off)
 
-    const unsubscribe = onStoreChange('prompts', () => {})
+    const received: string[] = []
+    const unsubscribe = onStoreChange('prompts', kind => received.push(kind))
     unsubscribe()
 
     expect(off).toHaveBeenCalledTimes(1)
+    // 远程那路由 onPageBroadcast 负责；本地那路必须自己摘掉，否则会累积僵尸订阅
+    notifyStoreChange('prompts')
+    expect(received).toEqual([])
+  })
+})
+
+describe('发起方自己也要收到（本地派发）', () => {
+  /*
+   * `runtime.sendMessage` 不投递给发送者帧 —— 所以「谁改的谁自己知道」这件事
+   * 不能指望广播。这条曾经漏掉：清空数据由设置页发起，它自己收不到那 4 条
+   * `cleared`，三个 ref（含 API Key）继续显示旧值，而界面文案写着「各页面会立即
+   * 恢复默认值」；用户再改一个字就把已清数据写回库里。
+   */
+  it('notifyStoreChange 会在本上下文派发一次', () => {
+    const received: string[] = []
+    onStoreChange('ai', kind => received.push(kind))
+
+    notifyStoreChange('ai', 'cleared')
+
+    expect(received).toEqual(['cleared'])
+  })
+
+  it('本地派发同样按 scope 过滤', () => {
+    const received: string[] = []
+    onStoreChange('resume', kind => received.push(kind))
+
+    notifyStoreChange('ai', 'cleared')
+    notifyStoreChange('resume', 'update')
+
+    expect(received).toEqual(['update'])
+  })
+
+  it('一个订阅方抛错不影响其他订阅方，也不影响写入方', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const received: string[] = []
+    onStoreChange('records', () => {
+      throw new Error('这个订阅方坏了')
+    })
+    onStoreChange('records', kind => received.push(kind))
+
+    expect(() => notifyStoreChange('records')).not.toThrow()
+    expect(received).toEqual(['update'])
+    expect(warn).toHaveBeenCalled()
   })
 })

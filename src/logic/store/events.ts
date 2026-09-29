@@ -57,15 +57,45 @@ export interface StoreChangeMessage {
 const CHANNEL = 'store-changed'
 
 /**
+ * 本上下文内的订阅者。
+ *
+ * 为什么必须有它：`runtime.sendMessage` **不投递给发送者帧**（真机踩过两次，
+ * 见模块头）。于是「发起方自己也该收到的变更」全部落空 —— 最典型的是
+ * `resetAllStorage`：清空是由设置页发起的，那 4 条 `cleared` 传到别的页面却回不到
+ * 设置页自己，它的三个 ref（含 API Key）仍显示旧值，而界面文案写着"各页面会立即
+ * 恢复默认值"；用户随后改一个字，就把已清掉的数据又写回库里。
+ *
+ * 所以 `notifyStoreChange` 除了广播，还**在本地派发一次**。两个方向不会重复：
+ * 发送者收不到自己那条广播，别的上下文又不在这个登记表里。
+ */
+type LocalListener = (message: StoreChangeMessage) => void
+const localListeners = new Set<LocalListener>()
+
+/**
  * 写入方调用（页面或后台）：fire-and-forget。
+ *
+ * 顺序是先本地、再广播：本地派发是**同步**的，订阅方（`useStoredValue`）能立刻
+ * 复位界面；广播是异步的，晚一点无所谓。
  *
  * **失败只记日志，绝不往上抛**：写入本身已经落库，通知是附加动作 —— 因为「没有别的
  * 页面在听」而让调用方看到错误、甚至把写入当成失败，等于把附加功能的故障升级成核心
  * 功能的故障。
  */
 export function notifyStoreChange(scope: StoreScope, kind: StoreChangeKind = 'update'): void {
+  const message: StoreChangeMessage = { scope, kind }
+
+  for (const listener of localListeners) {
+    try {
+      listener(message)
+    }
+    catch (error) {
+      // 一个订阅方炸了不该影响其他订阅方，更不该影响写入方
+      console.warn(`[offer-hunter] 本地处理 ${scope} 变更失败`, error)
+    }
+  }
+
   try {
-    broadcastToPages(CHANNEL, { scope, kind } satisfies StoreChangeMessage)
+    broadcastToPages(CHANNEL, message)
   }
   catch (error) {
     console.warn(`[offer-hunter] 通知 ${scope} 变更失败（写入已落库，不影响功能）`, error)
@@ -75,16 +105,30 @@ export function notifyStoreChange(scope: StoreScope, kind: StoreChangeKind = 'up
 /**
  * 订阅方调用（页面内）：返回取消订阅函数。
  *
+ * 同时挂本地与远程两路 —— 少了本地那一路，**发起变更的那个上下文自己收不到**
+ * （原因见 `localListeners`）。两路不会重复触发：发送者收不到自己的广播。
+ *
  * 只认自己 scope 的消息；载荷不合法（缺 scope / 认不出的 kind）直接忽略 ——
  * 广播是原样透传的，别的上下文（可能是旧版本）发什么就传什么；
  * 收到认不出的形状按「没有变更」处理，绝不能对 undefined 继续取值。
  */
 export function onStoreChange(scope: StoreScope, cb: (kind: StoreChangeKind) => void): () => void {
-  return onPageBroadcast<StoreChangeMessage>(CHANNEL, (data) => {
+  const local: LocalListener = (message) => {
+    if (message.scope === scope)
+      cb(message.kind)
+  }
+  localListeners.add(local)
+
+  const offRemote = onPageBroadcast<StoreChangeMessage>(CHANNEL, (data) => {
     if (!isStoreChangeMessage(data) || data.scope !== scope)
       return
     cb(data.kind)
   })
+
+  return () => {
+    localListeners.delete(local)
+    offRemote()
+  }
 }
 
 function isStoreChangeMessage(value: unknown): value is StoreChangeMessage {

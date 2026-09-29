@@ -196,9 +196,19 @@ IDB 之上还有一层**每上下文的内存 memo**：三个单文档不限量�
 **方案：复用仓库里已经跑通的 runtime 广播机制**（`messaging.ts` 的 `broadcastToPages` / `onPageBroadcast`，现在用于 `job-changed`）新增一条 `store-changed`：
 
 ```
-页面写入 IDB  ──callBackground('store-changed', scope)──▶ SW ──broadcastToPages──▶ 所有页面
-SW   写入 IDB  ───────────────────── broadcastToPages ─────────────────────────▶ 所有页面
+写入方（页面或后台）┬─ 本地派发 ──▶ 本上下文自己的订阅者（同步）
+                    └─ broadcastToPages ──▶ 其余所有上下文（异步）
 ```
+
+**为什么必须有「本地派发」这一路**：`runtime.sendMessage` **不投递给发送者帧**。
+只靠广播的话，发起变更的那个上下文自己收不到 —— 清空数据由设置页发起，它就收不到
+那 4 条 `cleared`，三个 ref（含 API Key）继续显示旧值，但界面文案写着"各页面会立即
+恢复默认值"；用户随后改一个字就把已清掉的数据写回库里。两路不会重复触发：发送者收不到
+自己那条广播，别的上下文又不在本地登记表里。
+
+> 这条链路最初写成「页面 → `callBackground` → 后台 → 转发」，在真机上错了两次：
+> 一是「后台自己写数据时无人应答」（发送者收不到，响应 undefined → 调用方抛错），
+> 二是「处理器返回 `void` 被判成没有响应」。两点都已在 `events.ts` 的模块头记录。
 
 ```ts
 // src/logic/store/events.ts
@@ -215,7 +225,7 @@ function onStoreChange(scope: Scope, cb: (kind: ChangeKind) => void): () => void
 
 - **为什么不用 `BroadcastChannel`**（虽然它在概念上更贴合）：仓库里已经有一套经过验证的运行时广播机制，而 `BroadcastChannel` 在 MV3 service worker 里的可用性在各浏览器上并不一致，为一个「锦上添花」的通道引入跨浏览器不确定性不值得。走后台转发虽然多一跳（亚毫秒级），但**送达是确定的**：页面发消息时 SW 必然被唤醒，SW 广播时它本来就在运行。选择与既有 `job-changed` 完全同构，也就没有第二套心智模型。
 - **`kind: 'cleared'` 是刻意新增的**：现在的 `storage.onChanged` 忽略删除事件，导致「清空数据后界面仍显示旧值」。新设计让清空事件**送达**，订阅方收到后把 ref 重置为 `fallback()` 并更新 `synced` 快照 —— 于是 `Options.vue:478-480` 那句「刷新页面后生效」可以删掉。已按 §9 决策 D 定为「立即重置」。
-- **对自己写入的回声仍然存在**：注意广播是**由后台发出的**（页面只是请后台转发），所以写入方页面**同样会收到**这条广播。因此 `useStoredValue` 必须保留现有的 `synced` 序列化快照比对，用它压掉回声与自己触发的写入（`storage.ts:313-317` 记载的那个 Firefox 自激写循环坑依然要防），这部分逻辑不变。
+- **回声已经不存在**：广播不投递给发送者，本地派发又只发给「本上下文自己的订阅者」，所以写入方不会收到自己那条。`useStoredValue` 仍保留 `synced` 序列化快照比对 —— 它现在防的是另一件事：**旧快照回灌、覆盖用户刚敲的内容**（`storage.ts` 里那段注释记载的 Firefox 自激写循环坑依然要防）。
 - **降级**：`notifyStoreChange` 用 `catch` 吞掉失败（后台没响应、没有页面在听都不该影响功能）；订阅方收不到广播时的行为等同于「本地写入已生效」，不会写崩。
 
 ---
