@@ -87,7 +87,7 @@ Adding one is a `src/sites/<id>/` directory plus a registry line — see the arc
 
 ## Privacy and security
 
-Read this before installing — it is the most important boundary of the project.
+Read this before installing — it is the most important boundary of the project. The full [privacy policy](./docs/privacy-policy.md) (Chinese) maps every claim back to the source file it comes from.
 
 - **Your resume is sent to a third-party AI.** Match analysis and opener generation both send the resume together with the JD to the endpoint you configured; redact anything sensitive first.
 - **A secret gist is not private.** It is merely unlisted and unsearchable, and **anyone holding the link can read it** — no sign-in, no token. Use a private repository if you need real access control.

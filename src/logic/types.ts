@@ -303,6 +303,30 @@ export function recordKey(ref: { siteId: SiteId, naturalKey: string }): string {
 }
 
 /**
+ * `JobRecord` 的字段清单 —— 运行时版本的「模型白名单」。
+ *
+ * 存在的理由：存储里可能躺着**比今天的模型更多的字段**（存量数据来自旧版本，
+ * 而 `mergeDefaults` 对账本这个动态键映射刻意不裁剪）。因此归一化必须按白名单
+ * 重建记录，而不是逐个删除已知的旧字段 —— 后者永远追不上历史遗留。
+ *
+ * ⚠ 类型写成 `Record<keyof JobRecord, true>` 是**故意的**：给 `JobRecord` 增删字段
+ *   而忘了改这里，编译就过不去。若写成 `string[]`，漏改的表现是「新加的字段
+ *   在存量记录上被静默清掉」——那是最难查的一类 bug。
+ */
+export const JOB_RECORD_FIELDS: Record<keyof JobRecord, true> = {
+  siteId: true,
+  naturalKey: true,
+  title: true,
+  company: true,
+  recruiterName: true,
+  salary: true,
+  match: true,
+  greeting: true,
+  error: true,
+  firstSeen: true,
+}
+
+/**
  * 岗位的账本身份。
  *
  * 优先用站点给的天然标识（`site.naturalKey`）。**站点给不出时**退回一个按岗位

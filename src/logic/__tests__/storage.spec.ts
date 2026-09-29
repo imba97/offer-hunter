@@ -1,13 +1,13 @@
 import type { JobRecord } from '../types'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { normalizeResumeSource } from '../resume-sources/registry'
 import {
   ensureSourceConfigs,
   mergeDefaults,
   migrateRecordKeys,
   migrateResumeShape,
-  stripRemovedRecordFields,
-} from '../storage'
+  normalizeRecordShape,
+} from '../store/migrations'
 import {
   createDefaultAiSettings,
   createDefaultPromptSettings,
@@ -16,16 +16,12 @@ import {
 } from '../types'
 
 /**
- * webextension-polyfill 在 jsdom 里没有 chrome.* 可用，import 时就会抛错。
- * 这里只测纯函数（迁移逻辑），把存储 API 换成假的即可 —— vi.mock 会被提升到
- * import 之前，所以下面的静态 import 拿到的是 mock 版本。
+ * 存储迁移（纯函数）的单测。
+ *
+ * 这些函数住在 `logic/store/migrations.ts`：它们被「日常读写」与「一次性迁移」
+ * 共用，而后者又被前者间接引用 —— 留在大文件里会形成循环依赖。
+ * 本文件只测纯函数，因此**不需要**任何存储 API 的替身。
  */
-vi.mock('webextension-polyfill', () => ({
-  storage: {
-    local: { get: vi.fn(), set: vi.fn(), remove: vi.fn() },
-    onChanged: { addListener: vi.fn(), removeListener: vi.fn() },
-  },
-}))
 
 /**
  * 存储迁移的单测。
@@ -102,30 +98,99 @@ describe('mergeDefaults', () => {
 })
 
 /**
- * 账本迁移：mergeDefaults 对动态键映射不做裁剪，所以被删掉的字段（status）
- * 只能靠这个函数抹掉，否则会永远跟着存量数据写回存储。
+ * 记录形状的归一化：**按当前模型白名单重建**。
+ *
+ * 存在的理由：`mergeDefaults` 对账本这个动态键映射不做裁剪，于是历史字段
+ * （接口原名、jdText、站点私有 id、早已无人消费的状态字段）会永远跟着存量数据。
+ * 真机上实测有 23 个这样的字段名，所以只能白名单式重建，不能逐个删。
  */
-describe('stripRemovedRecordFields', () => {
-  it('抹掉已删除的 status，并报告发生了改动', () => {
+describe('normalizeRecordShape', () => {
+  it('把接口原名映射到当前字段名，并丢掉模型外的字段', () => {
     const records = {
-      'boss:a': { siteId: 'boss', naturalKey: 'a', status: 'skipped', title: '前端' },
-      'boss:b': { siteId: 'boss', naturalKey: 'b', status: 'drafted' },
-      'boss:c': { siteId: 'boss', naturalKey: 'c' },
+      'boss:a': {
+        siteId: 'boss',
+        naturalKey: 'a',
+        jobName: '前端工程师',
+        brandName: '某某科技',
+        bossName: '李女士',
+        salaryDesc: '30-50K',
+        jdText: '岗位职责：…',
+        encryptJobId: 'enc-1',
+        haveChatted: true,
+        lastAction: 'greeted',
+        status: 'skipped',
+        match: { score: 80, summary: 's', reasons: ['r'], missingSkills: [] },
+        greeting: '您好',
+        error: null,
+        firstSeen: '2026-01-01T00:00:00.000Z',
+      },
     } as unknown as Record<string, JobRecord>
 
-    expect(stripRemovedRecordFields(records)).toBe(true)
-    // 只动 status，其他字段与本来就没有该字段的记录原样保留
-    expect(records).toEqual({
-      'boss:a': { siteId: 'boss', naturalKey: 'a', title: '前端' },
-      'boss:b': { siteId: 'boss', naturalKey: 'b' },
-      'boss:c': { siteId: 'boss', naturalKey: 'c' },
+    expect(normalizeRecordShape(records)).toBe(true)
+    expect(records['boss:a']).toEqual({
+      siteId: 'boss',
+      naturalKey: 'a',
+      title: '前端工程师',
+      company: '某某科技',
+      recruiterName: '李女士',
+      salary: '30-50K',
+      match: { score: 80, summary: 's', reasons: ['r'], missingSkills: [] },
+      greeting: '您好',
+      error: null,
+      firstSeen: '2026-01-01T00:00:00.000Z',
     })
   })
 
-  it('账本里已经没有旧字段时不报告改动（迁移保持幂等）', () => {
-    const records = { 'boss:a': { siteId: 'boss', naturalKey: 'a', match: null } } as unknown as Record<string, JobRecord>
+  it('当前字段名优先于接口原名（两种都有时不被旧值覆盖）', () => {
+    const records = {
+      'boss:a': { siteId: 'boss', naturalKey: 'a', title: '新标题', jobName: '旧标题', firstSeen: 'x' },
+    } as unknown as Record<string, JobRecord>
 
-    expect(stripRemovedRecordFields(records)).toBe(false)
+    normalizeRecordShape(records)
+    expect((records['boss:a'] as unknown as Record<string, unknown>).title).toBe('新标题')
+  })
+
+  it('身份字段缺失时从账本键回填（不留空身份的记录）', () => {
+    const records = { 'boss:abc123': { title: '前端' } } as unknown as Record<string, JobRecord>
+
+    normalizeRecordShape(records)
+    expect(records['boss:abc123']).toMatchObject({ siteId: 'boss', naturalKey: 'abc123' })
+  })
+
+  it('补全缺失字段，且已经合规的记录不报告改动（幂等）', () => {
+    const compliant = {
+      'boss:a': {
+        siteId: 'boss',
+        naturalKey: 'a',
+        title: '前端',
+        company: '',
+        recruiterName: '',
+        salary: '',
+        match: null,
+        greeting: null,
+        error: null,
+        firstSeen: '2026-01-01T00:00:00.000Z',
+      },
+    } as unknown as Record<string, JobRecord>
+
+    expect(normalizeRecordShape(compliant)).toBe(false)
+
+    const incomplete = { 'boss:b': { siteId: 'boss', naturalKey: 'b' } } as unknown as Record<string, JobRecord>
+    expect(normalizeRecordShape(incomplete)).toBe(true)
+    expect(incomplete['boss:b']).toMatchObject({ title: '', greeting: null, error: null, match: null })
+  })
+
+  it('match 缺数组时补成空数组（面板会 .join，缺了会崩），完好时连引用都不换', () => {
+    const intact = { score: 80, summary: 's', reasons: ['r'], missingSkills: ['m'] }
+    const records = {
+      'boss:broken': { siteId: 'boss', naturalKey: 'broken', match: { score: 70, summary: 's' }, firstSeen: 'x' },
+      'boss:ok': { siteId: 'boss', naturalKey: 'ok', match: intact, firstSeen: 'x' },
+    } as unknown as Record<string, JobRecord>
+
+    normalizeRecordShape(records)
+
+    expect(records['boss:broken'].match).toEqual({ score: 70, summary: 's', reasons: [], missingSkills: [] })
+    expect(records['boss:ok'].match).toBe(intact)
   })
 })
 

@@ -3,13 +3,13 @@ import { onMessage, sendMessage } from 'webext-bridge/background'
 import { broadcastToPages, handleBackgroundRequests } from '~/logic/messaging'
 import { getResumeSource } from '~/logic/resume-sources/registry'
 import {
-  ensureStorageDefaults,
   readAiSettings,
   readPromptSettings,
   readRecords,
   readResume,
   upsertRecord,
 } from '~/logic/storage'
+import { ensureStoreReady } from '~/logic/store/ready'
 import { generateGreeting, matchJob, testAiConnection } from '~/platform/ai/matching'
 import { detectSite, SITE_DESCRIPTORS } from '~/sites/routing'
 
@@ -45,18 +45,21 @@ if (import.meta.hot) {
 }
 
 /**
- * 每次都补齐存储默认值。
+ * 每次都补齐初始化。
  *
  * 不只在 onInstalled 里做：历史数据可能字段不全（早期版本的存储格式），
  * 而这些数据已经在用户机器上，onInstalled 不会再触发。
+ *
+ * `ensureStoreReady` 内部是「开库 → 请求持久化 → 一次性迁移」，
+ * **失败不缓存**（下次调用会重试），所以这里只需要记日志。
  */
-ensureStorageDefaults().catch((error) => {
-  console.error('[offer-hunter] 初始化默认设置失败', error)
+ensureStoreReady().catch((error) => {
+  console.error('[offer-hunter] 初始化存储失败', error)
 })
 
 browser.runtime.onInstalled.addListener((): void => {
-  ensureStorageDefaults().catch((error) => {
-    console.error('[offer-hunter] 初始化默认设置失败', error)
+  ensureStoreReady().catch((error) => {
+    console.error('[offer-hunter] 初始化存储失败', error)
   })
   // eslint-disable-next-line no-console
   console.log('Offer Hunter installed')

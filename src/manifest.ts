@@ -83,6 +83,12 @@ export async function getManifest() {
     },
     permissions: [
       'tabs',
+      /*
+       * TODO(过渡代码)：`storage` 只为读取旧版本遗留的 chrome.storage.local 数据
+       * （一次性迁移）而保留，见 docs/transitional-code.md。
+       * 迁移在真实用户中验证过一两个版本后，应单独发一版移除它 ——
+       * 日常读写走扩展自己的 IndexedDB，不需要任何权限（决策 C）。
+       */
       'storage',
       'activeTab',
       // 侧边栏是主要交互界面（浏览器原生，不存在遮挡与定位问题）

@@ -2,7 +2,7 @@
 import type { AiSettings, Resume } from '~/logic/types'
 import { computed, ref } from 'vue'
 import { callBackground } from '~/logic/messaging'
-import { STORAGE_KEYS, useStoredValue } from '~/logic/storage'
+import { useStoredValue } from '~/logic/storage'
 import { createDefaultAiSettings, createEmptyResume } from '~/logic/types'
 
 /**
@@ -16,8 +16,8 @@ import { createDefaultAiSettings, createEmptyResume } from '~/logic/types'
  * 现在每一步都由用户自己决定，阈值没有消费方，已移除。
  */
 
-const ai = useStoredValue<AiSettings>(STORAGE_KEYS.ai, createDefaultAiSettings)
-const resume = useStoredValue<Resume>(STORAGE_KEYS.resume, createEmptyResume)
+const ai = useStoredValue<AiSettings>('ai', createDefaultAiSettings)
+const resume = useStoredValue<Resume>('resume', createEmptyResume)
 
 const resumeReady = computed(() => resume.value.markdown.trim().length > 0)
 const aiReady = computed(() => (ai.value.apiKey ?? '').trim().length > 0)

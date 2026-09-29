@@ -36,6 +36,13 @@ import QuickSettings from './views/QuickSettings.vue'
 type Tab = 'job' | 'diagnostics' | 'settings'
 const tab = ref<Tab>('job')
 
+/** 标签清单 */
+const TABS: ReadonlyArray<readonly [Tab, string]> = [
+  ['job', '岗位'],
+  ['diagnostics', '诊断'],
+  ['settings', '设置'],
+]
+
 /** 受支持站点的名字（多站点时自动并列） */
 const sitesLabel = supportedSitesLabel()
 
@@ -347,7 +354,7 @@ function openJobsPage(site: (typeof SITE_DESCRIPTORS)[number]) {
       <header class="flex items-center justify-between gap-2 px-2 py-1.5">
         <nav class="flex items-center gap-1 text-xs">
           <button
-            v-for="t in ([['job', '岗位'], ['diagnostics', '诊断'], ['settings', '设置']] as const)"
+            v-for="t in TABS"
             :key="t[0]"
             class="rounded px-2.5 py-1 transition"
             :class="tab === t[0]

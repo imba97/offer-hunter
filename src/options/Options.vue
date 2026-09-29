@@ -12,7 +12,7 @@ import {
   normalizeResumeSource,
   resumeSourceOptions,
 } from '~/logic/resume-sources/registry'
-import { resetAllStorage, STORAGE_KEYS, useStoredValue } from '~/logic/storage'
+import { resetAllStorage, useStoredValue } from '~/logic/storage'
 import {
   createDefaultAiSettings,
   createDefaultPromptSettings,
@@ -48,13 +48,13 @@ const MarkdownEditor = defineAsyncComponent({
   delay: 0,
 })
 
-const ai = useStoredValue<AiSettings>(STORAGE_KEYS.ai, createDefaultAiSettings)
-const resume = useStoredValue<Resume>(STORAGE_KEYS.resume, createEmptyResume)
+const ai = useStoredValue<AiSettings>('ai', createDefaultAiSettings)
+const resume = useStoredValue<Resume>('resume', createEmptyResume)
 
 const tab = ref<'resume' | 'prompt' | 'ai'>('resume')
 
 const prompts = useStoredValue<PromptSettings>(
-  STORAGE_KEYS.prompts,
+  'prompts',
   createDefaultPromptSettings,
 )
 
@@ -476,7 +476,7 @@ async function clearAllData() {
               取消
             </button>
             <span v-if="resetState === 'done'" class="text-xs text-teal-700">
-              已清空，刷新页面后生效。
+              已清空（各页面会立即恢复默认值）。
             </span>
           </div>
           <p v-if="resetError" class="mt-2 text-xs text-red-700">

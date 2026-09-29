@@ -1,4 +1,17 @@
-# Chrome Web Store 权限说明（一句话版）
+# Chrome Web Store 提交材料
+
+## 隐私政策网址
+
+商店的「隐私权政策网址」填这两个之一（同一份文件，后者是纯文本、渲染更稳）：
+
+```
+https://github.com/imba97/offer-hunter/blob/main/docs/privacy-policy.md
+https://raw.githubusercontent.com/imba97/offer-hunter/main/docs/privacy-policy.md
+```
+
+内容见仓库内的 [privacy-policy.md](./privacy-policy.md)，其中第 12 节即为商店要求的数据使用（Limited Use）声明。
+
+## 权限说明（一句话版）
 
 > 与后台六个输入框一一对应，直接粘贴。
 
@@ -17,7 +30,7 @@
 **需请求 storage 的理由**
 
 ```
-在本机保存你的简历、AI 平台配置（含你自己的 API Key）、提示词与岗位账本，只在本机读写、不上传。
+仅用于读取 1.0.4 及更早版本遗留在 chrome.storage.local 中的数据，以完成一次性迁移；迁移校验无损后旧数据即被删除。日常读写使用扩展自己的 IndexedDB，不需要任何权限，也不上传。
 ```
 
 **需请求 activeTab 的理由**

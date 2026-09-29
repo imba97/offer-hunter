@@ -1,327 +1,154 @@
 import type { Ref } from 'vue'
-import type { ResumeSourceId } from './resume-sources/types'
-import type {
-  AiSettings,
-  JobRecord,
-  PromptSettings,
-  Resume,
-} from './types'
+import type { SettingId } from './store/settings'
+import type { AiSettings, JobRecord, PromptSettings, Resume } from './types'
 import { getCurrentScope, onScopeDispose, ref, watch } from 'vue'
 import { storage } from 'webextension-polyfill'
-import { RESUME_SOURCES } from './resume-sources/registry'
-import {
-  createDefaultAiSettings,
-  createDefaultPromptSettings,
-  createEmptyResume,
-  recordKey,
-} from './types'
+import { clearStore, runTx } from '~/platform/idb/database'
+import { notifyStoreChange, onStoreChange } from './store/events'
+import { STORAGE_KEYS } from './store/legacy'
+import { mergeDefaults, normalizeRecordShape, normalizeResumeDoc } from './store/migrations'
+import { ensureStoreReady } from './store/ready'
+import { clearRecords, readAllRecords, upsertRecord as writeRecord } from './store/records'
+import { readRawSetting, readSetting, writeSetting } from './store/settings'
+import { createDefaultAiSettings, createDefaultPromptSettings, recordKey } from './types'
 
 /**
- * storage.local 读写。
+ * 存储层的**唯一门面**。数据落在扩展自己的 IndexedDB 里
+ * （结构见 `platform/idb/schema.ts`，迁移见 `logic/store/legacy.ts`）。
  *
- * ⚠ 这里刻意不使用模板自带的 useWebExtensionStorage：它会把值 JSON 序列化成
- * **字符串**再写入，而 service worker 侧是直接 storage.local.get 的。
- * 两侧格式不一致会导致后台把字符串当对象读 —— 表现为「明明配了却报未配置」。
+ * 这个文件的设计目标是「换引擎，不换契约」：导出的函数名与语义与改造前一致，
+ * 调用方（后台、设置页、侧边栏）不需要知道底下换成了 IndexedDB。
  *
- * 因此统一由本模块负责读写，Vue 侧用 useStoredValue 包一层响应式，
- * 保证后台与页面看到的数据格式完全一致（都存原生对象）。
+ * 三条规矩：
+ *  1. **每个读写的第一行都是 `await ensureStoreReady()`** —— 那是初始化门闸，
+ *     保证不会有人读到「迁移跑了一半」的状态（旧实现靠"读的时候顺便归一"兜，
+ *     能用但很脆）。
+ *  2. **写之后必须 `notifyStoreChange()`** —— IndexedDB 没有变更事件，跨上下文
+ *     同步全靠这条广播（旧的 `storage.onChanged` 的替代品）。
+ *  3. **写进库的记录必须是当前形状** —— 入库前统一过一遍归一化，库里因此只会有
+ *     一种记录形状（决策 F2），将来的统计面板不用兼容历史字段。
  *
- * ⚠ 安全提示（已在设置页向用户明示）：chrome.storage.local **不加密**，
- * 能读取本机磁盘上浏览器数据的人即可拿到其中的 API Key。
+ * 改造前遗留的东西**只在这个文件里出现一次**：`resetAllStorage` 顺手删掉旧的
+ * chrome.storage 键（用户装回过旧版本时才会存在）。
+ *
+ * TODO(过渡代码)：上面那句「顺手删旧键」、`STORAGE_KEYS` 的导入，以及
+ * `manifest.ts` 里的 `storage` 权限，都是过渡代码，见 docs/transitional-code.md（第二批）。
  */
 
-const KEY_AI = 'offer-hunter-ai'
-const KEY_RESUME = 'offer-hunter-resume'
-/**
- * ⚠ 键名沿用 `offer-hunter-matching`：这个键从「打招呼规则」时代就在用，改名等于
- * 把存量用户写过的招呼语提示词丢掉（只有改键名才会读不到，值的形状由 mergeDefaults 补）。
- */
-const KEY_PROMPTS = 'offer-hunter-matching'
-const KEY_RECORDS = 'offer-hunter-records'
-
-export const STORAGE_KEYS = {
-  ai: KEY_AI,
-  resume: KEY_RESUME,
-  prompts: KEY_PROMPTS,
-  records: KEY_RECORDS,
-} as const
-
-/**
- * 兼容历史上被 JSON 字符串化的存量数据。
- *
- * 早期版本用的是模板自带的 useWebExtensionStorage，它会把值 JSON.stringify
- * 成**字符串**再写入。这里必须先把字符串解析回对象，否则下面 mergeDefaults 的
- * `typeof value !== 'object'` 分支会直接把字符串原样返回 —— 合并完全不发生，
- * 后续读 apiKey 之类的字段就全是 undefined。
- */
-function reviveLegacyString(value: unknown): unknown {
-  if (typeof value !== 'string')
-    return value
-  const trimmed = value.trim()
-  if (!trimmed.startsWith('{') && !trimmed.startsWith('['))
-    return value
-  try {
-    return JSON.parse(trimmed)
-  }
-  catch {
-    return value
-  }
-}
-
-/**
- * 用默认值补齐存储对象的缺失字段，并丢掉默认值里已不存在的字段。
- *
- * 为什么必须有：`read` 以前是「存储里有值就整体替换默认值」，于是任何**字段不全**
- * 的旧数据都会让后续代码拿到 undefined —— 典型表现是设置页读 `apiKey.trim()`
- * 直接抛 "Cannot read properties of undefined (reading 'trim')"。
- *
- * 为什么还要裁剪：只做「以存储为准」的合并会把**已删除的字段**一直留在对象里，
- * 还会被写回存储（例如移除「求职偏好」后，旧数据里的 `basics` 会一直跟着）。
- * 因此以 fallback 的键为准：fallback 是什么形状，结果就是什么形状。
- *
- * ⚠ 前提是每个存储键都有完整的默认值形状。记录账本 `{}` 这种「动态键映射」
- * 因为 fallback 没有键，会自动跳过裁剪（否则会把整张表清空）。
- *
- * 导出是为了单测：这是迁移逻辑的核心，出错的症状（读到 undefined）离原因很远。
- */
-export function mergeDefaults<T>(value: unknown, fallback: T): T {
-  const source = reviveLegacyString(value)
-  if (source === undefined || source === null)
-    return fallback
-  if (Array.isArray(fallback))
-    return (Array.isArray(source) ? source : fallback) as T
-  if (typeof fallback !== 'object' || typeof source !== 'object')
-    return source as T
-
-  const fb = fallback as Record<string, unknown>
-  const src = source as Record<string, unknown>
-
-  // fallback 没有声明任何键（动态映射，如记录账本），此时不能裁剪
-  const keys = Object.keys(fb)
-  if (keys.length === 0)
-    return source as T
-
-  const out: Record<string, unknown> = {}
-  for (const k of keys) {
-    const v = src[k]
-    if (v === undefined) {
-      out[k] = fb[k]
-      continue
-    }
-    out[k] = (v !== null && typeof v === 'object' && !Array.isArray(v))
-      ? mergeDefaults(v, fb[k] ?? {})
-      : reviveLegacyString(v)
-  }
-  return out as T
-}
-
-async function read<T>(key: string, fallback: T): Promise<T> {
-  const res = await storage.local.get(key)
-  return mergeDefaults(res[key], fallback)
-}
+/** 让页面侧继续用同一个名字拿到设置文档的 id 类型 */
+export type { SettingId }
 
 // ---------------------------------------------------------------------------
 // AI 设置
 // ---------------------------------------------------------------------------
 
-export function readAiSettings(): Promise<AiSettings> {
-  return read<AiSettings>(KEY_AI, createDefaultAiSettings())
+export async function readAiSettings(): Promise<AiSettings> {
+  await ensureStoreReady()
+  return readSetting<AiSettings>('ai', createDefaultAiSettings())
 }
 
-export function writeAiSettings(value: AiSettings): Promise<void> {
-  return storage.local.set({ [KEY_AI]: value })
+export async function writeAiSettings(value: AiSettings): Promise<void> {
+  await ensureStoreReady()
+  await writeSetting('ai', value)
+  notifyStoreChange('ai')
 }
 
 // ---------------------------------------------------------------------------
 // 简历
 // ---------------------------------------------------------------------------
 
-export function readResume(): Promise<Resume> {
-  return read<Resume>(KEY_RESUME, createEmptyResume())
+export async function readResume(): Promise<Resume> {
+  await ensureStoreReady()
+  return normalizeResumeDoc(await readRawSetting('resume'))
 }
 
-export function writeResume(value: Resume): Promise<void> {
-  return storage.local.set({ [KEY_RESUME]: value })
-}
-
-/**
- * 补齐每个来源自己的配置对象。
- *
- * 新增一个来源时，存量用户的 `sources` 里没有这个键；设置页的字段是
- * `v-model` 直接绑到 `sources[id][field]` 上的，读到 undefined 就会在渲染期炸。
- * 因此**每个已注册来源都必须有一份完整形状的配置**，哪怕它从没被用过。
- *
- * 未被使用的来源只是多存一个空对象，代价可忽略；换来的是「加来源不用写迁移」。
- */
-export function ensureSourceConfigs(
-  sources: Partial<Record<ResumeSourceId, Record<string, unknown>>> | undefined,
-): Record<string, Record<string, unknown>> {
-  const out: Record<string, Record<string, unknown>> = {}
-  for (const adapter of RESUME_SOURCES) {
-    // 以适配器的 createConfig 为准合并：它是什么形状，结果就是什么形状
-    out[adapter.id] = { ...adapter.createConfig(), ...(sources?.[adapter.id] ?? {}) }
-  }
-  return out
-}
-
-/**
- * 把「简历来源还是硬编码的 gist 字段」那个版本的存量数据迁到今天的分组形状。
- *
- * 要迁三处（都是**改名/搬家**，不改语义）：
- *   `resume.gist`       → `resume.sources.gist`
- *   `resume.syncedFrom` → `resume.syncedKey`
- *   缺失的其它来源配置 → 由 createConfig 补出
- *
- * 之所以必须做：`resume.gist` 里的 gistId / fileName / token 是用户手填的，
- * 丢了就得重新配；而 `syncedFrom` 丢了会让「刚同步过就别再取」的判断失效
- * （表现是每次打开设置页都重取一次，白烧 GitHub 额度）。
- *
- * 幂等：已经迁过的数据再跑一次不会改动任何东西（返回原对象引用）。
- * 导出是为了单测 —— 迁移出错的症状（配置莫名清空）离原因很远。
- */
-export function migrateResumeShape(raw: unknown): { value: unknown, changed: boolean } {
-  if (typeof raw !== 'object' || raw === null)
-    return { value: raw, changed: false }
-
-  const source = raw as Record<string, unknown>
-  const legacyGist = source.gist
-  const hasLegacyGist = typeof legacyGist === 'object' && legacyGist !== null
-  const hasLegacySynced = source.syncedFrom !== undefined
-  const sources = source.sources
-
-  if (!hasLegacyGist && !hasLegacySynced)
-    return { value: raw, changed: false }
-
-  const next: Record<string, unknown> = { ...source }
-
-  if (hasLegacyGist) {
-    // 只在还没迁过时填，避免覆盖新形状里已有的配置
-    const merged = ensureSourceConfigs({
-      ...(typeof sources === 'object' && sources !== null
-        ? sources as Partial<Record<ResumeSourceId, Record<string, unknown>>>
-        : {}),
-      gist: legacyGist as Record<string, unknown>,
-    })
-    next.sources = merged
-    delete next.gist
-  }
-
-  if (hasLegacySynced) {
-    next.syncedKey = source.syncedFrom
-    delete next.syncedFrom
-  }
-
-  return { value: next, changed: true }
+export async function writeResume(value: Resume): Promise<void> {
+  await ensureStoreReady()
+  await writeSetting('resume', value)
+  notifyStoreChange('resume')
 }
 
 // ---------------------------------------------------------------------------
 // 提示词
 // ---------------------------------------------------------------------------
 
-export function readPromptSettings(): Promise<PromptSettings> {
-  return read<PromptSettings>(KEY_PROMPTS, createDefaultPromptSettings())
+export async function readPromptSettings(): Promise<PromptSettings> {
+  await ensureStoreReady()
+  return readSetting<PromptSettings>('prompts', createDefaultPromptSettings())
 }
 
-export function writePromptSettings(value: PromptSettings): Promise<void> {
-  return storage.local.set({ [KEY_PROMPTS]: value })
+export async function writePromptSettings(value: PromptSettings): Promise<void> {
+  await ensureStoreReady()
+  await writeSetting('prompts', value)
+  notifyStoreChange('prompts')
 }
 
 // ---------------------------------------------------------------------------
-// 岗位记录账本
+// 岗位账本
 // ---------------------------------------------------------------------------
 
-/**
- * 以 `siteId:naturalKey` 为键（见 types.ts 的 recordKey）。
- *
- * 这张表是刚需而非优化：没有它，每次刷新都会对同一批岗位重复打招呼，
- * 既浪费配额，也是风控触发点。
- */
 export async function readRecords(): Promise<Record<string, JobRecord>> {
-  const all = await read<Record<string, JobRecord>>(KEY_RECORDS, {})
-  /*
-   * 读的时候也归一一次（幂等、不写盘）：界面可能在 service worker 的启动迁移
-   * （ensureStorageDefaults）跑完之前就来读账本 —— 那时旧键还没改名，
-   * 查 `boss:<id>` 会全部落空（表现为「以前分析过的岗位要重新分析」）。
-   * 归一之后这次就读得对，下一次写入自然会把迁移后的键落盘。
-   */
-  migrateRecordKeys(all)
-  return all
+  await ensureStoreReady()
+  return readAllRecords()
 }
 
 /**
- * 账本写入串行化。
+ * 写一条账本记录。
  *
- * upsertRecord 是「读整表 → 改一条 → 写整表」，而 service worker 是**并发**
- * 处理消息的（多窗口各有一个侧边栏时尤其明显）：两次写入交错就会互相覆盖，
- * 丢掉其中一条记录。用一个 promise 链把它们排队即可，开销可忽略。
+ * 容量与淘汰在 `store/records.ts` 里（写与淘汰同一个事务），这里只负责
+ * 「先归一化再入库」这一层门面职责。
  */
-let ledgerWriteChain: Promise<unknown> = Promise.resolve()
+export async function upsertRecord(record: JobRecord): Promise<void> {
+  await ensureStoreReady()
 
-function serializeLedgerWrite<T>(task: () => Promise<T>): Promise<T> {
-  const run = ledgerWriteChain.then(task, task)
-  ledgerWriteChain = run.then(() => undefined, () => undefined)
-  return run
-}
+  // 归一化是就地改的，所以借一张单条表过一遍；库里只允许存在当前形状的记录
+  const single: Record<string, JobRecord> = { [recordKey(record)]: record }
+  normalizeRecordShape(single)
+  await writeRecord(single[recordKey(record)])
 
-/**
- * 账本上限。
- *
- * 表只增不减的话，长期使用（加上以后要做的投递记录面板）会一路撞上
- * storage.local 的配额 —— 那时的表现是所有写入静默失败，而不是表变大。
- * 超限时按 firstSeen 丢掉最旧的记录；代价仅仅是极久以前的岗位可能被重新分析。
- */
-const MAX_RECORDS = 2000
-
-function pruneRecords(all: Record<string, JobRecord>): Record<string, JobRecord> {
-  const keys = Object.keys(all)
-  if (keys.length <= MAX_RECORDS)
-    return all
-
-  // firstSeen 是 ISO 字符串，字典序即时间序
-  const oldestFirst = keys.sort((a, b) => (all[a]?.firstSeen ?? '').localeCompare(all[b]?.firstSeen ?? ''))
-  const dropped = oldestFirst.slice(0, keys.length - MAX_RECORDS)
-  for (const key of dropped)
-    delete all[key]
-
-  console.warn(`[offer-hunter] 账本超过 ${MAX_RECORDS} 条，已丢弃最旧的 ${dropped.length} 条`)
-  return all
-}
-
-export function upsertRecord(record: JobRecord): Promise<void> {
-  return serializeLedgerWrite(async () => {
-    const all = await readRecords()
-    all[recordKey(record)] = record
-    await storage.local.set({ [KEY_RECORDS]: pruneRecords(all) })
-  })
+  notifyStoreChange('records')
 }
 
 // ---------------------------------------------------------------------------
-// Vue 侧响应式封装
+// 响应式封装（Vue 侧）
 // ---------------------------------------------------------------------------
 
 /** 写入节流窗口：Monaco 每敲一个字符都会改值，逐字符落盘没有必要 */
 const WRITE_DEBOUNCE_MS = 400
 
 /**
- * 把某个存储键包成响应式 ref，并与 storage.local 双向同步。
+ * 按 id 取归一化后的设置值。
  *
- * 与模板 composable 的关键差异：**存取的都是原生对象，不做 JSON 字符串化**，
- * 从而与 service worker 侧的 readXxx / writeXxx 完全一致。
+ * 简历要跑完整归一（补来源配置、搬 legacy 字段），其余两个只是补齐默认值 ——
+ * 「每个已注册来源都必须有完整形状的配置」这条约束原来由启动时的
+ * `ensureStorageDefaults` 落盘保证，现在改成**读时保证**：少一次写，
+ * 而且不会因为启动顺序不同而出现"有时有、有时没有"。
+ */
+function normalizeSetting(id: SettingId, raw: unknown, fallback: () => object): object {
+  if (id === 'resume')
+    return normalizeResumeDoc(raw)
+  return mergeDefaults(raw, fallback())
+}
+
+/**
+ * 把某个设置文档包成响应式 ref，并与存储双向同步。
  *
- * 三处必须小心的地方（都踩过）：
+ * 与改造前的差异只有一处：**跨上下文同步从 `storage.onChanged` 换成
+ * `onStoreChange` 广播**（IndexedDB 没有变更事件）。其余三处踩过的坑照旧要防：
  *
- * 1. **回声**：自己写入后 storage.onChanged 也会回调。若把回调值直接赋回 ref，
- *    就成了「写入 → 回调 → 赋值 → 写入」的自激循环。Chrome 对未变化的 set
- *    不派发事件（只多写一轮），Firefox 无论如何都派发，会变成停不下来的写循环
- *    （见 w3c/webextensions#511）。因此用 `synced` 记住「已与存储一致」的序列化值，
- *    回声与它相同就直接忽略；它同时避免了旧的快照回灌、覆盖用户刚敲的内容。
+ * 1. **回声**：广播由后台发出，所以**写入方自己也会收到**。若把回调值直接赋回
+ *    ref，就成了「写入 → 回调 → 赋值 → 写入」的自激循环。因此用 `synced` 记住
+ *    「已与存储一致」的序列化值，回声与它相同就直接忽略。
  * 2. **节流**：deep watch 会在每次输入时触发，写入必须 debounce，并在页面卸载 /
  *    组件卸载时补一次落盘。
  * 3. **监听器生命周期**：侧边栏里切换标签会反复挂载子组件，不注销就会累积
  *    一组组僵尸监听器（它们还会继续往存储回写）。
+ *
+ * 新增的一条：`cleared` 广播**会被送达**（旧的 `storage.onChanged` 忽略删除事件），
+ * 收到后把 ref 重置为默认值 —— 于是「清空数据后要刷新页面才生效」这个瑕疵没有了。
  */
 export function useStoredValue<T extends object>(
-  key: string,
+  id: SettingId,
   fallback: () => T,
 ): Ref<T> {
   const state = ref(fallback()) as Ref<T>
@@ -329,10 +156,11 @@ export function useStoredValue<T extends object>(
   /** 最近一次「已经与存储一致」的序列化值 */
   let synced = JSON.stringify(state.value)
   let timer: ReturnType<typeof setTimeout> | null = null
+  let disposed = false
 
   /** 应用一份来自存储的值（初次读取、或其他上下文的改动） */
   function applyIncoming(raw: unknown): void {
-    const merged = mergeDefaults(raw, fallback())
+    const merged = normalizeSetting(id, raw, fallback) as T
     const next = JSON.stringify(merged)
     if (next === synced)
       return
@@ -351,16 +179,28 @@ export function useStoredValue<T extends object>(
     if (next === synced)
       return
     synced = next
-    storage.local.set({ [key]: value }).catch((error) => {
-      console.error(`[offer-hunter] 写入 ${key} 失败`, error)
-    })
+    writeSetting(id, value)
+      .then(() => notifyStoreChange(id))
+      .catch((error) => {
+        // 写失败要把「已同步」的标记退回去，否则界面会以为已经存上了
+        synced = ''
+        console.error(`[offer-hunter] 写入设置 ${id} 失败`, error)
+      })
   }
 
-  storage.local.get(key).then((res) => {
-    applyIncoming(res[key])
-  }).catch((error) => {
-    console.error(`[offer-hunter] 读取 ${key} 失败`, error)
-  })
+  function load(): void {
+    ensureStoreReady()
+      .then(() => readRawSetting(id))
+      .then((raw) => {
+        if (!disposed)
+          applyIncoming(raw)
+      })
+      .catch((error) => {
+        console.error(`[offer-hunter] 读取设置 ${id} 失败`, error)
+      })
+  }
+
+  load()
 
   watch(state, (value) => {
     if (JSON.stringify(value) === synced)
@@ -370,13 +210,16 @@ export function useStoredValue<T extends object>(
     timer = setTimeout(flush, WRITE_DEBOUNCE_MS, state.value)
   }, { deep: true, flush: 'post' })
 
-  // 其他上下文改动时同步过来（例如面板改了阈值，设置页立即反映）
-  const onChange = (changes: Record<string, { newValue?: unknown }>) => {
-    const change = changes[key]
-    if (change && change.newValue !== undefined)
-      applyIncoming(change.newValue)
-  }
-  storage.onChanged.addListener(onChange)
+  // 其他上下文改动时同步过来（例如面板改了配置，设置页立即反映）
+  const off = onStoreChange(id, (kind) => {
+    if (kind === 'cleared') {
+      const reset = fallback()
+      synced = JSON.stringify(reset)
+      state.value = reset
+      return
+    }
+    load()
+  })
 
   // 扩展页随时可能被直接关掉，关页前把待写入的改动落盘
   const onPageHide = () => flush(state.value)
@@ -384,8 +227,9 @@ export function useStoredValue<T extends object>(
 
   if (getCurrentScope()) {
     onScopeDispose(() => {
+      disposed = true
       flush(state.value)
-      storage.onChanged.removeListener(onChange)
+      off()
       window.removeEventListener('pagehide', onPageHide)
     })
   }
@@ -393,156 +237,34 @@ export function useStoredValue<T extends object>(
   return state
 }
 
-/**
- * 抹掉账本记录里已经删掉的字段。
- *
- * 账本是动态键映射，mergeDefaults 对它不做裁剪（fallback 没有键，一裁就会把
- * 整张表清空），所以「删掉一个字段」这件事只能在这里手工补一刀 —— 不管的话，
- * 存量记录里的旧字段会一直留着，还会被写回存储。
- *
- * 目前要抹的是 `status`：自动化流程（已跳过 / 已生成招呼语）的遗留字段，
- * 已从 JobRecord 中移除，界面上也不再有任何消费方。
- *
- * 导出是为了单测：这是迁移逻辑，出错时的症状（旧字段永远跟着存量数据）离原因很远。
- */
-export function stripRemovedRecordFields(all: Record<string, JobRecord>): boolean {
-  let changed = false
-  for (const record of Object.values(all)) {
-    const legacy = record as JobRecord & { status?: unknown }
-    if (legacy.status === undefined)
-      continue
-    delete legacy.status
-    changed = true
-  }
-  return changed
-}
+// ---------------------------------------------------------------------------
+// 重置
+// ---------------------------------------------------------------------------
 
 /**
- * 把「账本键只是 securityId」那个版本的存量数据迁到站点命名空间键。
+ * 清空全部扩展数据（设置页的「清空本地数据」）。
  *
- * 要改两处（都是**改名**，不改语义）：
- *   键 `abc123`            → `boss:abc123`
- *   字段 `record.securityId` → `record.naturalKey`，并补上 `record.siteId`
+ * 一个事务清掉两个仓库；`meta` 里的迁移标记**刻意保留** —— 清空后旧键也没了，
+ * 标记留着才不会让下次启动又把「已迁移」的判定重跑一遍。
  *
- * 为什么必须做：键没有站点命名空间时，两个站点的岗位标识撞车会把 A 站的分析结果
- * 显示到 B 站的岗位上（缓存命中错误的记录）。而**存量数据一律属于 BOSS** ——
- * 加第二个站点之前，扩展只支持 BOSS 一家，这个前提让迁移是确定的、不需要猜。
- *
- * 幂等：已经带命名空间（键里有 `:`）的数据原样保留，第二次运行不做任何改动。
- * 导出是为了单测：迁移出错的症状（旧账本的匹配结果全丢）离原因很远。
+ * 顺手删一次旧的 chrome.storage 键：正常情况它们已不存在，只有「用户装回过
+ * 旧版本」时才会又出现（那种情况下不删就等于清空没清干净）。
  */
-export function migrateRecordKeys(all: Record<string, JobRecord>): boolean {
-  let changed = false
-
-  for (const [key, record] of Object.entries(all)) {
-    if (!record || typeof record !== 'object') {
-      delete all[key]
-      changed = true
-      continue
-    }
-
-    const legacy = record as JobRecord & { securityId?: unknown }
-
-    /*
-     * 键里带 `:` 说明已经迁过。这里刻意**不**用「字段在不在」判断：
-     * 一条刚写入的新记录两种信息都有，用键判断最省事也最不容易误判。
-     */
-    if (key.includes(':'))
-      continue
-
-    const siteId = typeof legacy.siteId === 'string' && legacy.siteId ? legacy.siteId : 'boss'
-    const naturalKey = typeof legacy.naturalKey === 'string' && legacy.naturalKey
-      ? legacy.naturalKey
-      : (typeof legacy.securityId === 'string' ? legacy.securityId : key)
-
-    delete legacy.securityId
-    legacy.siteId = siteId
-    legacy.naturalKey = naturalKey
-
-    delete all[key]
-    all[recordKey({ siteId, naturalKey })] = record
-    changed = true
-  }
-
-  return changed
-}
-
-/**
- * 把所有存储键补上默认值，并把已有数据里缺失的字段补齐。
- *
- * 由 service worker 每次启动时调用，保证：
- *  1. 首次打开设置页不会显示空表单
- *  2. 旧数据（字符串格式 / 字段不全 / 换过格式）被就地迁移，用户不需要手动清存储
- *  3. useStoredValue 不需要「载入完成前不回写」的守卫
- *     —— 那个守卫会和 watch 抢时序，导致改动被静默丢弃
- *  4. 账本里已经删掉的字段（如 status）被抹掉，而不是永远跟着存量数据
- *
- * 迁移是幂等的：第二次运行会因为 JSON 完全一致而跳过写入。
- */
-export async function ensureStorageDefaults(): Promise<void> {
-  const keys = [KEY_AI, KEY_RESUME, KEY_PROMPTS, KEY_RECORDS]
-
-  let existing: Record<string, unknown>
-  try {
-    existing = await storage.local.get(keys)
-  }
-  catch (error) {
-    console.error('[offer-hunter] 读取存储失败，跳过初始化', error)
-    return
-  }
-
-  const patch: Record<string, unknown> = {}
-
-  const ai = mergeDefaults(existing[KEY_AI], createDefaultAiSettings())
-  if (JSON.stringify(ai) !== JSON.stringify(existing[KEY_AI]))
-    patch[KEY_AI] = ai
-
-  const resume = mergeDefaults(existing[KEY_RESUME], createEmptyResume())
-  /*
-   * 两步走：先 mergeDefaults 补齐缺失字段，再跑一次命名迁移。
-   *
-   * 顺序不能反：mergeDefaults 只认 fallback 声明过的键（`sources` / `syncedKey`），
-   * 而存量数据里是 `gist` / `syncedFrom` —— 它会把这两个旧键直接裁掉。
-   * 所以必须在裁掉**之前**把它们读出来搬过去。
-   */
-  const migrated = migrateResumeShape(existing[KEY_RESUME])
-  const resumeNext = migrated.changed
-    ? mergeDefaults(migrated.value, createEmptyResume())
-    : resume
-  // 每个已注册来源都要有完整形状的配置，否则设置页 v-model 会读到 undefined
-  const resumeWithSources: Resume = {
-    ...resumeNext,
-    sources: ensureSourceConfigs(resumeNext.sources),
-  }
-  if (JSON.stringify(resumeWithSources) !== JSON.stringify(existing[KEY_RESUME]))
-    patch[KEY_RESUME] = resumeWithSources
-
-  const prompts = mergeDefaults(existing[KEY_PROMPTS], createDefaultPromptSettings())
-  if (JSON.stringify(prompts) !== JSON.stringify(existing[KEY_PROMPTS]))
-    patch[KEY_PROMPTS] = prompts
-
-  // 账本：既要兼容历史上被字符串化的数据，也要抹掉已删除的字段、补上站点命名空间键
-  const recordsNeedWrite = existing[KEY_RECORDS] === undefined
-    || existing[KEY_RECORDS] === null
-    || typeof existing[KEY_RECORDS] === 'string'
-  const records = mergeDefaults(existing[KEY_RECORDS], {}) as Record<string, JobRecord>
-  const recordsMigrated = migrateRecordKeys(records)
-  if (recordsNeedWrite || recordsMigrated || stripRemovedRecordFields(records))
-    patch[KEY_RECORDS] = records
-
-  if (Object.keys(patch).length === 0)
-    return
-
-  try {
-    await storage.local.set(patch)
-  }
-  catch (error) {
-    console.error('[offer-hunter] 写入初始数据失败', error)
-  }
-}
-
-/** 清空所有扩展数据（供设置页的「重置」使用） */
 export async function resetAllStorage(): Promise<void> {
-  await storage.local.remove([KEY_AI, KEY_RESUME, KEY_PROMPTS, KEY_RECORDS])
-  await ensureStorageDefaults()
+  await ensureStoreReady()
+
+  await runTx(['settings', 'records'], 'readwrite', async (ctx) => {
+    await clearStore('settings', ctx)
+    await clearRecords(ctx)
+  })
+
+  try {
+    await storage.local.remove(Object.values(STORAGE_KEYS))
+  }
+  catch {
+    // 没有旧键可删（或 storage 不可用）都不该让清空失败
+  }
+
+  for (const id of ['ai', 'resume', 'prompts', 'records'] as const)
+    notifyStoreChange(id, 'cleared')
 }
