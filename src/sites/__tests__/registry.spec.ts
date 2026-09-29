@@ -3,6 +3,7 @@ import { bossSite } from '../boss'
 import { eleduckSite } from '../eleduck'
 import { contentScriptEntries, getJobSite, JOB_SITES } from '../registry'
 import { detectSite, getSiteDescriptor, SITE_DESCRIPTORS, siteMatches, supportedSitesLabel } from '../routing'
+import { v2exSite } from '../v2ex'
 import { NON_SITE_URLS, SITE_PAGE_URLS } from './urlFixtures'
 
 /**
@@ -149,6 +150,7 @@ describe('getJobSite / detectSite', () => {
   it('按 id 取站点', () => {
     expect(getJobSite('boss')).toBe(bossSite)
     expect(getJobSite('eleduck')).toBe(eleduckSite)
+    expect(getJobSite('v2ex')).toBe(v2exSite)
   })
 
   it('未知 id 返回 undefined', () => {

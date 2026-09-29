@@ -1,4 +1,5 @@
 minimumReleaseAgeExcludePrune: true
+
 trustPolicy: no-downgrade
 # 例外名单：这些包不参与「信任降级」检查。
 #

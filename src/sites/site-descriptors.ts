@@ -29,6 +29,19 @@ export const ELEDUCK_HOSTNAMES = ['eleduck.com']
  */
 export const ELEDUCK_JOBS_PAGE_URL = 'https://eleduck.com/jobs-channel'
 
+export const V2EX_SITE_ID = 'v2ex'
+/*
+ * 两个域名族：v2ex.com 是主站（含 www），v2ex.co 是官方备用域名
+ * （搜索结果与部分地区的跳转都落在 global.v2ex.co）。
+ */
+export const V2EX_MATCHES = ['*://*.v2ex.com/*', '*://*.v2ex.co/*']
+export const V2EX_HOSTNAMES = ['v2ex.com', 'v2ex.co']
+/*
+ * 「酷工作」节点页。同样只是**列表**地址：拿岗位内容要到具体的帖子页
+ * （/t/<id>），且只认发在这个节点下的帖子。
+ */
+export const V2EX_JOBS_PAGE_URL = 'https://www.v2ex.com/go/jobs'
+
 export const SITE_DESCRIPTORS: SiteDescriptor[] = [
   {
     id: BOSS_SITE_ID,
@@ -52,5 +65,21 @@ export const SITE_DESCRIPTORS: SiteDescriptor[] = [
     textColor: '#3d2f0b',
     matches: ELEDUCK_MATCHES,
     hostnames: ELEDUCK_HOSTNAMES,
+  },
+  {
+    id: V2EX_SITE_ID,
+    label: 'V2EX',
+    jobsPageUrl: V2EX_JOBS_PAGE_URL,
+    // 帖子正文由服务端直接渲染进 HTML，页面自己不调详情接口，因此只读 DOM
+    source: 'dom',
+    /*
+     * V2EX 的「灰蓝」主色（人工选定，不取自站内色板）：V2EX 自身没有品牌蓝，
+     * 全站唯一的贯穿色是站点头部那条 #778087，而它偏浅、当按钮底色不够沉。
+     * 取更深的 #444455，白色文字在其上的对比度约 9.2:1。
+     */
+    color: '#444455',
+    textColor: '#ffffff',
+    matches: V2EX_MATCHES,
+    hostnames: V2EX_HOSTNAMES,
   },
 ]

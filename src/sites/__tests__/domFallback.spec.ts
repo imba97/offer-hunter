@@ -1,20 +1,16 @@
 import type { JobCore, JobView } from '~/logic/types'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createEmptyJobView } from '~/logic/types'
-import { buildDomFallbackView, preferText } from '../dom-fallback'
+import { buildDomFallbackView, preferText, sameJobFromUrl, titleOnlyJob } from '../dom-fallback'
 
 /**
  * DOM 兜底骨架的测试。
  *
- * 这个骨架存在的意义就是把两个站点共同的三条不变量收在一处，因此这里钉的就是
- * 那三条：**标题兜底顺序**、**站点身份（含私有 id 与兜底身份）**、**来源标记**。
- * 各站点的差异（继承谁、清谁）不在这里测 —— 那是两个站点自己的 spec 的事。
+ * 这个骨架存在的意义就是把各站点共同的不变量收在一处，因此这里钉的就是它们：
+ * **标题兜底顺序**、**站点身份（含私有 id 与兜底身份）**、**来源标记**、
+ * **`job` 回调的标题/公司名继承规则**、**「同一岗位」判据**。
+ * 各站点的差异（继承谁、清谁）不在这里测 —— 那是各站点自己的 spec 的事。
  */
-
-/** 造一个「站点自己的 job 拼装」，只带标题，和电鸭的形态一致 */
-function titleOnlyJob(title: string, baseJob: JobCore | undefined): JobCore {
-  return { title, company: title === baseJob?.title ? baseJob?.company : undefined }
-}
 
 function build(patch: Partial<Parameters<typeof buildDomFallbackView>[0]> = {}): JobView {
   return buildDomFallbackView({
@@ -155,5 +151,106 @@ describe('骨架与 createEmptyJobView 的关系', () => {
     const empty = createEmptyJobView()
 
     expect(Object.keys(view).sort()).toEqual(Object.keys(empty).sort())
+  })
+})
+
+/**
+ * `titleOnlyJob` 是「只给得出标题」的站点（电鸭、V2EX）共用的 `job` 回调。
+ *
+ * 这里钉的是那条不变量：**标题变了就不继承公司名**。它不是可有可无的清理 ——
+ * 用户点开另一个帖子而 base 里还留着上一个帖子的公司名时，张冠李戴会直接显示在
+ * 面板上（两个站点此前各有一份逐字相同的实现，行为只被各自的 spec 间接覆盖）。
+ */
+describe('titleOnlyJob（只给得出标题的站点的 job 回调）', () => {
+  it('只带标题，不带薪资/地点等结构化字段', () => {
+    expect(titleOnlyJob('某岗位', undefined)).toEqual({ title: '某岗位', company: undefined })
+  })
+
+  it('标题没变时继承 base 里的公司名（同一岗位的重新读取）', () => {
+    const base = { title: '某岗位', company: '某公司', salary: '20k' } as JobCore
+    const job = titleOnlyJob('某岗位', base)
+
+    expect(job.company).toBe('某公司')
+    // 薪资这类字段不属于这个形状：只挑标题与公司，不整个 {...base}
+    expect(job).toEqual({ title: '某岗位', company: '某公司' })
+  })
+
+  it('标题变了就不继承公司名（换了一个帖子，base 属于上一个岗位）', () => {
+    const base = { title: '上一个岗位', company: '上一个公司' } as JobCore
+
+    expect(titleOnlyJob('新岗位', base).company).toBeUndefined()
+  })
+
+  it('base 里公司名本来就是空的时，继承到的仍是 undefined（「没有」只有一种表示）', () => {
+    const job = titleOnlyJob('某岗位', { title: '某岗位' } as JobCore)
+
+    expect(job.company).toBeUndefined()
+  })
+})
+
+/**
+ * `sameJobFromUrl` 是「地址里带稳定标识」的站点（电鸭 `/posts/<slug>`、V2EX `/t/<id>`）
+ * 共用的判据，此前两个站点各写了一份逐字相同的实现。
+ *
+ * 顺序是有意义的：**标识优先于文本**。用文本优先会让同一个帖子在重渲染或被截断后
+ * 换一个身份，于是账本里攒出多条记录、刚分析过的结果查不回来（真实故障）。
+ */
+describe('sameJobFromUrl（地址里带稳定标识的站点的同一岗位判据）', () => {
+  /** 造一个「从 /t/<id> 取标识」的站点读取函数，模拟 V2EX 的形态 */
+  const keyFromUrl = (url: string): string => /\/t\/(\d+)/.exec(url)?.[1] ?? ''
+
+  function view(site: { siteId: string, naturalKey: string }, jdText: string): JobView {
+    return createEmptyJobView({ site, jdText })
+  }
+
+  function withLocation(href: string, run: () => void): void {
+    vi.stubGlobal('location', { href })
+    try {
+      run()
+    }
+    finally {
+      vi.unstubAllGlobals()
+    }
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('地址上的标识相同 → 同一岗位（哪怕文本完全不同）', () => {
+    withLocation('https://www.v2ex.com/t/1245478', () => {
+      const existing = view({ siteId: 'v2ex', naturalKey: '1245478' }, '旧 JD')
+      expect(sameJobFromUrl(keyFromUrl, existing, '完全不同的 JD')).toBe(true)
+    })
+  })
+
+  it('地址上的标识不同 → 不是同一岗位（哪怕文本一模一样）', () => {
+    withLocation('https://www.v2ex.com/t/9999999', () => {
+      const existing = view({ siteId: 'v2ex', naturalKey: '1245478' }, '一样的 JD')
+      expect(sameJobFromUrl(keyFromUrl, existing, '一样的 JD')).toBe(false)
+    })
+  })
+
+  it('地址上拿不到标识时退回文本比对：互相包含即同一岗位', () => {
+    withLocation('https://www.v2ex.com/go/jobs', () => {
+      const full = '完整的 JD 正文，包含职责与要求'
+      const existing = view({ siteId: 'v2ex', naturalKey: '' }, full)
+
+      // 两个方向都算同一岗位：DOM 读到的往往是截断版（页面折叠/增量渲染），
+      // 也可能反过来比已有文本更全（先兜底读了摘要、后续渲染出全文）。
+      expect(sameJobFromUrl(keyFromUrl, existing, '完整的 JD 正文')).toBe(true)
+      expect(sameJobFromUrl(keyFromUrl, existing, `${full}，还追加了一段`)).toBe(true)
+
+      // ⚠ 但「互相包含」只在有包含关系时成立：两段各有独立内容的文本是不同岗位
+      expect(sameJobFromUrl(keyFromUrl, existing, '另一段完全不同的 JD 正文，包含职责与要求啊')).toBe(false)
+      expect(sameJobFromUrl(keyFromUrl, existing, '另一个帖子的 JD')).toBe(false)
+    })
+  })
+
+  it('地址上拿不到标识、已有 JD 又是空的 → 视为同一岗位（没有依据说它变了）', () => {
+    withLocation('https://www.v2ex.com/go/jobs', () => {
+      const existing = view({ siteId: 'v2ex', naturalKey: '' }, '')
+      expect(sameJobFromUrl(keyFromUrl, existing, '任意文本')).toBe(true)
+    })
   })
 })

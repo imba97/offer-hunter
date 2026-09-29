@@ -1,6 +1,7 @@
 import type { DomJobSiteAdapter } from '../types'
 import type { SiteRef } from '~/logic/types'
 import { hostnameOf, isHostOf } from '../descriptors'
+import { sameJobFromUrl } from '../dom-fallback'
 import { ELEDUCK_HOSTNAMES, ELEDUCK_JOBS_PAGE_URL, ELEDUCK_MATCHES, ELEDUCK_SITE_ID } from '../site-descriptors'
 import {
   buildDomFallbackJob,
@@ -62,16 +63,9 @@ export const eleduckSite: DomJobSiteAdapter = {
    * 是否同一个岗位。
    *
    * 帖子地址里就带着 slug，因此优先比它；拿不到时退回文本比对 ——
-   * DOM 读到的 JD 与已有 JD 在换行/分段上未必一致，用「互相包含」而不是相等。
+   * 这条判据与 V2EX 逐字相同，走共用骨架（sites/dom-fallback.ts 的 sameJobFromUrl）。
    */
-  sameJob(existing, jd) {
-    const postId = postIdFromUrl(window.location.href)
-    if (postId)
-      return postId === existing.site.naturalKey
-    if (!existing.jdText)
-      return true
-    return jd.includes(existing.jdText) || existing.jdText.includes(jd)
-  },
+  sameJob: (existing, jd) => sameJobFromUrl(postIdFromUrl, existing, jd),
 
   emptyRef: (naturalKey): SiteRef => ({ siteId: ELEDUCK_SITE_ID, naturalKey }),
 

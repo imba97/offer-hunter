@@ -92,3 +92,47 @@ export function buildDomFallbackView(input: DomFallbackInput): JobView {
    */
   return { ...view, site: jobIdentity(view) }
 }
+
+/**
+ * 「站点只给得出标题」时 `job` 回调的共用实现（电鸭与 V2EX 同形）。
+ *
+ * 语义就是一条不变量：**标题变了就不继承公司名**。两个来源都给不出公司（帖子里的
+ * 公司名是自由文本），所以能继承的只有 `base` 里那一份；而 `base` 属于上一次读到
+ * 的那个帖子 —— 标题都变了还留着旧公司名，就是张冠李戴。
+ *
+ * ⚠ BOSS **不用**这个：它的 `job` 回调要另外显式清掉 recruiter（见 boss/dom.ts），
+ *   形态不同。按本文件文件头的原则，那种差异留在站点侧，不做「带开关的伪共用」。
+ */
+export function titleOnlyJob(title: string, baseJob: JobCore | undefined): JobCore {
+  return { title, company: title === baseJob?.title ? baseJob?.company : undefined }
+}
+
+/**
+ * 「是不是同一个岗位」的共用骨架，给**地址里带稳定标识**的 DOM 站点用。
+ *
+ * 电鸭（`/posts/<slug>`）与 V2EX（`/t/<id>`）的判据逐字相同，此前各写了一份 ——
+ * 而它是写进适配器契约的行为（见 sites/types.ts 的 sameJob），不该有第三份实现。
+ *
+ * 两条规则，顺序有意义：
+ *
+ *  1. **地址上的标识说了算。** 它是站点给的稳定身份，比正文可靠：同一个帖子重渲染
+ *     或被截断后文本会变，但标识不变。用文本判会让「每刷新一次就变成新岗位」，
+ *     于是账本里同一岗位攒出多条记录、刚分析过的结果查不回来（真机故障）。
+ *  2. **拿不到标识时才比文本，且用「互相包含」而不是相等。** JD 在接口与 DOM 两条
+ *     路径上的换行/分段未必一致；严格相等会把同一岗位判成两个。
+ *
+ * `naturalKeyFromUrl` 由调用方注入（各站点从 URL 取标识的方式是站点私有知识），
+ * 因此这里不引任何站点代码。
+ */
+export function sameJobFromUrl(
+  naturalKeyFromUrl: (url: string) => string,
+  existing: JobView,
+  jd: string,
+): boolean {
+  const naturalKey = naturalKeyFromUrl(window.location.href)
+  if (naturalKey)
+    return naturalKey === existing.site.naturalKey
+  if (!existing.jdText)
+    return true
+  return jd.includes(existing.jdText) || existing.jdText.includes(jd)
+}

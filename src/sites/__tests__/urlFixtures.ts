@@ -28,10 +28,23 @@ export const ELEDUCK_PAGE_URLS = [
   'https://www.eleduck.com/posts/z1fRK7',
 ]
 
+export const V2EX_PAGE_URLS = [
+  // 酷工作节点页（「打开职位页」按钮的目标）
+  'https://www.v2ex.com/go/jobs',
+  // 帖子详情页：真正读岗位的地方
+  'https://www.v2ex.com/t/1245478',
+  'https://www.v2ex.com/t/1245478#reply3',
+  'https://v2ex.com/t/1245478',
+  'http://www.v2ex.com/t/1245478',
+  // 官方备用域名（部分地区与搜索结果会落到这里）
+  'https://global.v2ex.co/t/1245478',
+]
+
 /** 站点 id → 属于它的地址。加站点时这里也要加一组，否则「认不认得出」没有测试。 */
 export const SITE_PAGE_URLS: Record<string, string[]> = {
   boss: BOSS_PAGE_URLS,
   eleduck: ELEDUCK_PAGE_URLS,
+  v2ex: V2EX_PAGE_URLS,
 }
 
 export const NON_SITE_URLS = [
@@ -40,6 +53,9 @@ export const NON_SITE_URLS = [
   'https://zhipin.com.evil.com/web/geek/jobs',
   // 同理：eleduck.com 之外的都是别的站点
   'https://eleduck.com.evil.com/posts/z1fRK7',
+  // 同理：v2ex.com / v2ex.co 之外的都是别的站点
+  'https://v2ex.com.evil.com/t/1245478',
+  'https://v2ex.co.evil.com/t/1245478',
   'https://www.liepin.com/',
   'https://www.51job.com/',
   // 浏览器内部页 / 扩展页

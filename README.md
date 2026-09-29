@@ -78,6 +78,7 @@ Base URL, model and max output tokens are overridable on every preset, and there
 | --- | --- | --- |
 | [BOSS Zhipin](https://www.zhipin.com/web/geek/jobs) | The site's own API | Captures the job detail responses passively; the richest data (salary, company, recruiter) |
 | [eleduck](https://eleduck.com/jobs-channel) | Page DOM only | Reads the title and body of a job post; no structured fields, so company and salary stay empty |
+| [V2EX 酷工作](https://www.v2ex.com/go/jobs) | Page DOM only | Only posts filed under the 酷工作 (`/go/jobs`) node count; reads the title and body, so company and salary stay empty |
 
 The side panel's Jobs tab lists one "open jobs page" button per platform, in that platform's brand colour; open any posting from there and it becomes the job under analysis.
 
@@ -151,13 +152,26 @@ Two conventions come straight from real sites:
   translation does not compile.
 - **Everything on `JobCore` except `title` is optional.** Salary, degree, funding
   stage and friends only exist on structured APIs like BOSS's; a DOM-only source
-  naturally yields just a title and a body, and inventing the rest would invent
-  wrong data.
+  (eleduck, V2EX) naturally yields just a title and a body, and inventing the rest
+  would invent wrong data.
 
 Site information lives outside `JobCore` (in `JobView.site`), so `matching.ts`,
 `Sidepanel.vue` and `JobDetailCard.vue` depend only on the site-agnostic
 `JobCore` — none of them change when a site is added. The "open the jobs page"
 buttons are rendered from the descriptors, colours included.
+
+V2EX brings a question the other sites do not have: **it is a general forum, so a
+post is not automatically a job posting.** The "is this page a job?" judgement
+therefore lives in the adapter's `readJd` / `readOutline` (it keys off the `/go/jobs`
+link in the node breadcrumb, see `sites/v2ex/selectors.ts`), and posts filed under
+any other node return `null` — the content script then produces no job at all.
+
+That judgement deliberately stays **out** of the container selectors
+(`jdProbeElement` / `jdContainerElement`): they only answer "is the container
+there", which is what the observer needs to attach at all. Put the judgement there
+and a non-job post leaves the observer retrying its mount every 500ms (see
+`sites/types.ts`). Both read functions apply the same predicate independently
+rather than pushing it down into the container layer.
 
 The job ledger is keyed by `siteId:naturalKey` (see `recordKey` in
 `logic/types.ts`); data from the single-site era is migrated on startup.
