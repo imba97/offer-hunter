@@ -1,6 +1,6 @@
 import type { Ref } from 'vue'
 import type { SettingId } from './store/settings'
-import type { AiSettings, JobRecord, PromptSettings, Resume } from './types'
+import type { AiSettings, JobRecord, PromptSettings, Resume, RetentionSettings } from './types'
 import { getCurrentScope, onScopeDispose, ref, watch } from 'vue'
 import { storage } from 'webextension-polyfill'
 import { clearStore, runTx } from '~/platform/idb/database'
@@ -8,9 +8,9 @@ import { notifyStoreChange, onStoreChange } from './store/events'
 import { STORAGE_KEYS } from './store/legacy'
 import { mergeDefaults, normalizeRecordShape, normalizeResumeDoc } from './store/migrations'
 import { ensureStoreReady } from './store/ready'
-import { clearRecords, readAllRecords, upsertRecord as writeRecord } from './store/records'
+import { clearRecords, pruneByAge, readAllRecords, upsertRecord as writeRecord } from './store/records'
 import { readRawSetting, readSetting, writeSetting } from './store/settings'
-import { createDefaultAiSettings, createDefaultPromptSettings, recordKey } from './types'
+import { createDefaultAiSettings, createDefaultPromptSettings, createDefaultRetentionSettings, recordKey } from './types'
 
 /**
  * 存储层的**唯一门面**。数据落在扩展自己的 IndexedDB 里
@@ -84,6 +84,35 @@ export async function writePromptSettings(value: PromptSettings): Promise<void> 
 }
 
 // ---------------------------------------------------------------------------
+// 账本保留策略
+// ---------------------------------------------------------------------------
+
+export async function readRetentionSettings(): Promise<RetentionSettings> {
+  await ensureStoreReady()
+  return readSetting<RetentionSettings>('retention', createDefaultRetentionSettings())
+}
+
+/**
+ * 保存保留策略，并**立刻按新策略清一次**，返回清掉的条数。
+ *
+ * ⚠ 这个设置**必须走本函数**，不能像其他设置那样交给 `useStoredValue`
+ *   （它内部直接调 `writeSetting`）：否则「改完立刻清」这一步会被绕过，
+ *   用户改成 30 天之后要等下次启动才看到旧记录消失，会以为设置没生效。
+ *   设置页就是按这个约定写的（选择框自己 `@change` 调这里）。
+ */
+export async function writeRetentionSettings(value: RetentionSettings): Promise<number> {
+  await ensureStoreReady()
+  // 同样要过一遍纯对象：设置页传进来的可能是响应式对象，Proxy 克隆不了
+  await writeSetting('retention', JSON.parse(JSON.stringify(value)))
+  notifyStoreChange('retention')
+
+  const removed = await pruneByAge(value.days)
+  if (removed > 0)
+    notifyStoreChange('records', 'cleared')
+  return removed
+}
+
+// ---------------------------------------------------------------------------
 // 岗位账本
 // ---------------------------------------------------------------------------
 
@@ -147,6 +176,17 @@ function normalizeSetting(id: SettingId, raw: unknown, fallback: () => object): 
  * 新增的一条：`cleared` 广播**会被送达**（旧的 `storage.onChanged` 忽略删除事件），
  * 收到后把 ref 重置为默认值 —— 于是「清空数据后要刷新页面才生效」这个瑕疵没有了。
  */
+/**
+ * 把序列化结果反解成**可结构化克隆**的纯对象。
+ *
+ * IndexedDB 用结构化克隆保存值，而**Proxy 克隆不了** —— Vue 的响应式对象正是 Proxy。
+ * 直接把它交给 `put()` 会抛 `DataCloneError`。序列化再反解是这里最省事、也最不会
+ * 走样的「去响应式」办法：设置文档本来就是 JSON 形状的数据。
+ */
+function toPlain<T>(json: string): T {
+  return JSON.parse(json) as T
+}
+
 export function useStoredValue<T extends object>(
   id: SettingId,
   fallback: () => T,
@@ -179,7 +219,18 @@ export function useStoredValue<T extends object>(
     if (next === synced)
       return
     synced = next
-    writeSetting(id, value)
+    /*
+     * ⚠ 落盘的是 `JSON.parse(next)`（纯 JSON），**不是** `value` 本身。
+     *
+     * `value` 是 Vue 的响应式 Proxy（deep watch 给出来的就是它），而 IndexedDB 的
+     * 结构化克隆**不能克隆 Proxy**：真机上表现为
+     * `DataCloneError: Failed to execute 'put' on 'IDBObjectStore': #<Object> could not be cloned.`
+     * 写入整个失败，界面上却没有任何提示（只有这行 console.error）。
+     *
+     * 用已经算好的序列化结果反解一遍，还有个附带好处：它与 `synced` 是**同一个形态**，
+     * 于是「写进去的」和「认为已同步的」不会因为 `undefined` 字段而在下次回声时对不上。
+     */
+    writeSetting(id, toPlain(next))
       .then(() => notifyStoreChange(id))
       .catch((error) => {
         // 写失败要把「已同步」的标记退回去，否则界面会以为已经存上了

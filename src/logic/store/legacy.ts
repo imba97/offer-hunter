@@ -1,4 +1,3 @@
-import type { SettingId } from '~/logic/store/settings'
 import type { AiSettings, JobRecord, PromptSettings, Resume } from '~/logic/types'
 import type { TxContext } from '~/platform/idb/database'
 import { storage } from 'webextension-polyfill'
@@ -210,6 +209,15 @@ export function planMigration(snapshot: LegacySnapshot): MigrationPlan {
 /** `meta` 仓库里的迁移标记键 */
 const META_MIGRATION = 'migration'
 
+/**
+ * 有旧存储键可迁的那三个设置。
+ *
+ * 刻意**不含** `retention`（账本保留策略）：它是新加的、旧版本里不存在，
+ * 因此不参与「降级合并时谁接管谁」的判断。
+ */
+type LegacySettingId = 'ai' | 'resume' | 'prompts'
+const LEGACY_SETTING_IDS = ['ai', 'resume', 'prompts'] as const
+
 export interface MigrationMeta {
   state: 'done'
   from: 'chrome.storage.local'
@@ -327,21 +335,21 @@ async function mergeLegacyAfterDowngrade(values: Partial<Record<LegacyKeyId, unk
    *    于是旧版本期间新建的简历永远不被接管，紧接着旧键就被删掉 = 静默丢失。
    *    （真机级后果，评审用「prompts 有测试、resume 没有」这个不对称发现的。）
    */
-  const defaults: Record<SettingId, object> = {
+  const defaults: Record<LegacySettingId, object> = {
     ai: createDefaultAiSettings(),
     resume: createEmptyResume(),
     prompts: createDefaultPromptSettings(),
   }
 
   /** 按 id 归一成「库里实际会长的样子」——与门面读出来的一致 */
-  const effective = (id: SettingId, raw: unknown): object =>
+  const effective = (id: LegacySettingId, raw: unknown): object =>
     id === 'resume' ? normalizeResumeDoc(raw) : mergeDefaults(raw, defaults[id])
 
   // 用 stableJson 而不是 JSON.stringify：这个比较不该受键序影响
-  const defaultDigest = (id: SettingId): string => stableJson(effective(id, defaults[id]))
+  const defaultDigest = (id: LegacySettingId): string => stableJson(effective(id, defaults[id]))
 
-  const takeover: SettingId[] = []
-  for (const id of ['ai', 'resume', 'prompts'] as const) {
+  const takeover: LegacySettingId[] = []
+  for (const id of LEGACY_SETTING_IDS) {
     const current = await readRawSetting(id)
     const isDefault = current === undefined
       || stableJson(effective(id, current)) === defaultDigest(id)

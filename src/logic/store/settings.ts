@@ -15,7 +15,7 @@ import { mergeDefaults } from './migrations'
  *   的产物）与真实迁移就会走出两条不同的路。
  */
 
-export type SettingId = 'ai' | 'resume' | 'prompts'
+export type SettingId = 'ai' | 'resume' | 'prompts' | 'retention'
 
 /**
  * 文档形状。

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { reactive } from 'vue'
 import {
   clearStore,
   closeDb,
@@ -250,6 +251,27 @@ describe('事务与原子性', () => {
   it('单条 put 失败会抛出来，而不是静默成功', async () => {
     // records 是外部键仓库，不传键时会抛 DataError
     await expect(put('records', { siteId: 'boss' })).rejects.toThrow()
+  })
+
+  /*
+   * 结构化克隆**不能克隆 Proxy**，而 Vue 的响应式对象就是 Proxy（`reactive()` 包的
+   * 就是它）。真机症状：设置页改了简历 → 落盘
+   * `DataCloneError: Failed to execute 'put' on 'IDBObjectStore': #<Object> could not be cloned.`
+   * → 写入整个失败，而界面上没有任何提示（只有一行 console.error），
+   * 用户以为已经存上了。
+   *
+   * 所以写入前必须转成纯对象（门面 `storage.ts` 的 `toPlain` 就是干这个的）。
+   * 这条测试钉住的是**平台行为**，免得以后有人把那次转换当成多余的往返删掉。
+   */
+  it('响应式 Proxy 不能直接写库，序列化后的纯对象可以', async () => {
+    const reactiveDoc = reactive({ id: 'ai', value: { platform: 'deepseek' }, updatedAt: 'now' })
+
+    await expect(put('settings', reactiveDoc, undefined)).rejects.toThrow(/clone/i)
+
+    await put('settings', JSON.parse(JSON.stringify(reactiveDoc)), undefined)
+    expect(await get<{ value: { platform: string } }>('settings', 'ai')).toMatchObject({
+      value: { platform: 'deepseek' },
+    })
   })
 })
 

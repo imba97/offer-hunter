@@ -12,11 +12,13 @@ import {
   normalizeResumeSource,
   resumeSourceOptions,
 } from '~/logic/resume-sources/registry'
-import { resetAllStorage, useStoredValue } from '~/logic/storage'
+import { readRetentionSettings, resetAllStorage, useStoredValue, writeRetentionSettings } from '~/logic/storage'
 import {
   createDefaultAiSettings,
   createDefaultPromptSettings,
+  createDefaultRetentionSettings,
   createEmptyResume,
+  RETENTION_DAY_OPTIONS,
 } from '~/logic/types'
 import { AI_PLATFORM_OPTIONS } from '~/platform/ai/platforms'
 
@@ -57,6 +59,51 @@ const prompts = useStoredValue<PromptSettings>(
   'prompts',
   createDefaultPromptSettings,
 )
+
+/**
+ * 账本保留策略。
+ *
+ * ⚠ 这里**不用 `useStoredValue`**：它写入时直接调 `writeSetting`，会绕过
+ *   `writeRetentionSettings` 里「改完立刻按新策略清一次」那一步 —— 用户改成 30 天
+ *   却要等下次启动才看到旧记录消失，会以为设置没生效。所以自己读一次、自己 @change 写。
+ */
+const retentionDays = ref(createDefaultRetentionSettings().days)
+const retentionState = ref<'idle' | 'saving' | 'saved' | 'failed'>('idle')
+const retentionMessage = ref('')
+
+/*
+ * 读一次当前值。
+ *
+ * ⚠ 刻意不用 `useAsyncState(readRetentionSettings, createDefaultRetentionSettings())`：
+ *   那个 API 的第二个参数是**初始值**而不是工厂，传函数进去会让 `data` 一开始就是
+ *   这个函数，读 `.days` 当场抛 TypeError（真机上报的就是这个）。
+ *   这里只要一个初始值，手动读反而没有可猜错的地方；读失败也不拦着用户改设置。
+ */
+readRetentionSettings()
+  .then((value) => {
+    retentionDays.value = value.days
+  })
+  .catch((error) => {
+    console.warn('[offer-hunter] 读取账本保留策略失败，先按默认值显示', error)
+  })
+
+async function onRetentionChange(event: Event): Promise<void> {
+  const days = Number((event.target as HTMLSelectElement).value)
+  retentionDays.value = days
+  retentionState.value = 'saving'
+  try {
+    const removed = await writeRetentionSettings({ days })
+    retentionState.value = 'saved'
+    retentionMessage.value = removed > 0
+      ? `已保存，并清理了 ${removed} 条过期记录。`
+      : (days === 0 ? '已保存：不再按时间清理。' : '已保存：没有需要清理的记录。')
+  }
+  catch (error) {
+    // 写失败必须让用户看见 —— 只打 console 的话，界面看起来像已经存上了
+    retentionState.value = 'failed'
+    retentionMessage.value = error instanceof Error ? error.message : String(error)
+  }
+}
 
 /**
  * 接口地址输入框的 placeholder。
@@ -245,6 +292,7 @@ async function clearAllData() {
             ['resume', '简历'],
             ['prompt', '提示词'],
             ['ai', 'AI 平台'],
+            ['data', '数据'],
           ] as const)"
           :key="t[0]"
           class="-mb-px border-b-2 px-4 py-2 transition"
@@ -349,7 +397,7 @@ async function clearAllData() {
       </section>
 
       <!-- AI 平台 -->
-      <section v-else class="space-y-5 rounded-lg bg-white p-6 shadow-sm">
+      <section v-else-if="tab === 'ai'" class="space-y-5 rounded-lg bg-white p-6 shadow-sm">
         <div>
           <span class="mb-2 block text-sm text-gray-600">平台</span>
           <div class="grid grid-cols-2 gap-2">
@@ -451,8 +499,53 @@ async function clearAllData() {
             </p>
           </div>
         </div>
+      </section>
 
-        <!-- 数据管理 -->
+      <!-- 数据：本地留存与删除。放在这里而不是 AI 页，是因为它与 AI 配置无关，
+           而与「本机存了什么、存多久、怎么删掉」有关 -->
+      <section v-else class="space-y-5 rounded-lg bg-white p-6 shadow-sm">
+        <!-- 账本保留：按时间清理 + 条数上限（两个机制互相独立，都要说清） -->
+        <div class="rounded-lg border border-gray-200 bg-white p-4">
+          <h3 class="text-sm font-medium text-gray-800">
+            岗位账本保留
+          </h3>
+          <label class="mt-2 block">
+            <span class="mb-1 block text-xs text-gray-600">按首次记录时间清理</span>
+            <select
+              class="oh-input"
+              :value="retentionDays"
+              :disabled="retentionState === 'saving'"
+              @change="onRetentionChange"
+            >
+              <option v-for="days in RETENTION_DAY_OPTIONS" :key="days" :value="days">
+                {{ days === 0 ? '永不' : `${days} 天` }}
+              </option>
+            </select>
+          </label>
+          <p v-if="retentionState === 'saved'" class="mt-2 text-xs text-teal-700">
+            {{ retentionMessage }}
+          </p>
+          <p v-if="retentionState === 'failed'" class="mt-2 text-xs text-red-700">
+            保存失败：{{ retentionMessage }}
+          </p>
+          <p class="mt-2 text-xs text-gray-500">
+            账本记住每个看过的岗位的分析结果，回头看同一个岗位不必重算。
+          </p>
+          <ul class="mt-2 list-disc space-y-0.5 pl-4 text-xs text-gray-500">
+            <li>
+              <strong>条数上限 2000 条会滚动更新</strong>：超过之后每写入一条就丢掉最旧的一条
+              （按首次记录时间），不会报警也不会停止记录。
+            </li>
+            <li>
+              按时间清理的判据是<strong>首次看到这个岗位的时间</strong>，不是最近一次使用 ——
+              一直没投、但经常回来看看的老岗位也可能被清掉。
+            </li>
+            <li>两个机制互相独立：即使选了「永不」，2000 条的上限依然生效。</li>
+            <li>改动会立即生效（当次就清一次），清理不可恢复。</li>
+          </ul>
+        </div>
+
+        <!-- 清空本地数据 -->
         <div class="rounded-lg border border-red-200 bg-red-50/60 p-4">
           <h3 class="text-sm font-medium text-red-800">
             清空本地数据

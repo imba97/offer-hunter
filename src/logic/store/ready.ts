@@ -1,4 +1,8 @@
+import type { RetentionSettings } from '~/logic/types'
 import { runMigration } from '~/logic/store/legacy'
+import { pruneByAge } from '~/logic/store/records'
+import { readSetting } from '~/logic/store/settings'
+import { createDefaultRetentionSettings } from '~/logic/types'
 import { openDb } from '~/platform/idb/database'
 
 /**
@@ -39,6 +43,23 @@ async function init(): Promise<void> {
     // eslint-disable-next-line no-console
     console.log(`[offer-hunter] 已迁移到 IndexedDB：${result.counts?.records ?? 0} 条岗位记录`)
   }
+
+  await pruneLedgerByRetention()
+}
+
+/**
+ * 按保留策略清一次账本（默认 `days: 0` = 不做）。
+ *
+ * 放在初始化而不是写入路径：这是「按天」的清理，跟着每次写入跑没有意义；而初始化
+ * 在每个上下文只做一次，页面与后台不论谁先起来都会清一遍（清理幂等、且在事务里做，
+ * 两个上下文同时跑也只有一个真正删到东西）。
+ *
+ * ⚠ 这里直接读 store 层的设置，**不走门面 `logic/storage.ts`** ——
+ *   门面依赖本模块（`ensureStoreReady`），反过来依赖就成环了。
+ */
+async function pruneLedgerByRetention(): Promise<void> {
+  const settings = await readSetting<RetentionSettings>('retention', createDefaultRetentionSettings())
+  await pruneByAge(settings.days)
 }
 
 /**

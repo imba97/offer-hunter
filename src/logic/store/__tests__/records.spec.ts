@@ -1,7 +1,7 @@
 import type { JobRecord } from '~/logic/types'
 import type { Entry } from '~/platform/idb/database'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { clearRecords, countRecords, MAX_RECORDS, readAllRecords, readRecord, upsertRecord } from '~/logic/store/records'
+import { clearRecords, countRecords, MAX_RECORDS, pruneByAge, readAllRecords, readRecord, upsertRecord } from '~/logic/store/records'
 import { recordKey } from '~/logic/types'
 import { closeDb, put, putMany, runTx } from '~/platform/idb/database'
 import { DB_NAME } from '~/platform/idb/schema'
@@ -109,6 +109,58 @@ describe('读写', () => {
     await clearRecords()
     expect(await countRecords()).toBe(0)
     expect(await readAllRecords()).toEqual({})
+  })
+})
+
+describe('按保留天数清理', () => {
+  /** 相对「现在」`daysAgo` 天前的一条记录 */
+  function recordSeenDaysAgo(daysAgo: number, key: string): JobRecord {
+    return {
+      ...jobRecord(0),
+      naturalKey: key,
+      firstSeen: new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000).toISOString(),
+    }
+  }
+
+  it('只删过期的，边界内的留着', async () => {
+    await putMany('records', [
+      { key: 'boss:old-100', value: recordSeenDaysAgo(100, 'old-100') },
+      { key: 'boss:old-40', value: recordSeenDaysAgo(40, 'old-40') },
+      { key: 'boss:fresh-1', value: recordSeenDaysAgo(1, 'fresh-1') },
+      { key: 'boss:fresh-0', value: recordSeenDaysAgo(0, 'fresh-0') },
+    ])
+
+    expect(await pruneByAge(30)).toBe(2)
+
+    expect(Object.keys(await readAllRecords()).sort()).toEqual(['boss:fresh-0', 'boss:fresh-1'])
+  })
+
+  it('默认的 0 天（永不清理）什么都不做', async () => {
+    await putMany('records', [{ key: 'boss:ancient', value: recordSeenDaysAgo(9999, 'ancient') }])
+
+    expect(await pruneByAge(0)).toBe(0)
+    expect(await countRecords()).toBe(1)
+  })
+
+  it('非法天数（NaN / 负数）同样不动数据', async () => {
+    await putMany('records', [{ key: 'boss:a', value: recordSeenDaysAgo(9999, 'a') }])
+
+    expect(await pruneByAge(Number.NaN)).toBe(0)
+    expect(await pruneByAge(-5)).toBe(0)
+    expect(await countRecords()).toBe(1)
+  })
+
+  it('与条数上限互相独立：按时间清理不触发上限逻辑', async () => {
+    const old = Array.from({ length: 5 }, (_, i) => ({
+      key: `boss:old-${i}`,
+      value: recordSeenDaysAgo(200, `old-${i}`),
+    }))
+    await putMany('records', old)
+    // 用「一天前」而不是 jobRecord()：后者的 firstSeen 是固定日期，会随「今天」漂移
+    await put('records', recordSeenDaysAgo(1, 'fresh'), 'boss:fresh')
+
+    expect(await pruneByAge(90)).toBe(5)
+    expect(await countRecords()).toBe(1)
   })
 })
 

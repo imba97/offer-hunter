@@ -102,6 +102,46 @@ async function pruneOverflow(ctx: TxContext): Promise<void> {
   console.warn(`[offer-hunter] 账本超过 ${MAX_RECORDS} 条，已丢弃最旧的 ${overflow} 条`)
 }
 
+/** 一天的毫秒数（保留天数的换算基准） */
+const DAY_MS = 24 * 60 * 60 * 1000
+
+/**
+ * 按时间清理账本（设置项 `retention.days`）。
+ *
+ * 判据是 **`firstSeen`**（首次记录时间）而不是「最近使用」：后者需要给记录加
+ * `lastSeen` 并建索引（schema 升到 v2）。因此设置页与隐私政策里的措辞必须一致
+ * ——「按首次看到该岗位的时间清理」。
+ *
+ * 用 `IDBKeyRange.upperBound(cutoff)` 只扫**过期的前缀**：`by-firstSeen` 是升序索引，
+ * 只要日期在 cutoff 之前就都在开头这一段里，不需要遍历全表。
+ *
+ * `days <= 0` 直接不做（默认值就是 0 = 永不按时间清理）。返回删掉的条数，供日志与测试。
+ */
+export async function pruneByAge(days: number): Promise<number> {
+  if (!Number.isFinite(days) || days <= 0)
+    return 0
+
+  const cutoff = new Date(Date.now() - days * DAY_MS).toISOString()
+  let removed = 0
+
+  await runTx(['records'], 'readwrite', async (ctx) => {
+    await iterate<JobRecord>(
+      'records',
+      { index: 'by-firstSeen', range: IDBKeyRange.upperBound(cutoff), direction: 'next' },
+      (_value, key) => {
+        void del('records', key, ctx)
+        removed++
+      },
+      ctx,
+    )
+  })
+
+  if (removed > 0)
+    console.warn(`[offer-hunter] 账本按保留策略（${days} 天）清理了 ${removed} 条`)
+
+  return removed
+}
+
 /** 条数（迁移校验用） */
 export function countRecords(): Promise<number> {
   return count('records')
