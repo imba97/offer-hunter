@@ -6,30 +6,28 @@ English | [简体中文](./README_CN.md)
 [![License](https://img.shields.io/github/license/imba97/offer-hunter)](./LICENSE)
 [![Manifest V3](https://img.shields.io/badge/manifest-v3-4b8bbe)](https://developer.chrome.com/docs/extensions/develop/migrate/what-is-mv3)
 [![Browsers](https://img.shields.io/badge/browsers-Chrome%20%7C%20Edge%20%7C%20Firefox-4b8bbe)](#install)
-[![Outreach](https://img.shields.io/badge/outreach-sent%20by%20you%20only-149e9b)](#design-boundaries)
 
 <p align="center">
   <img src="./extension/assets/icon-128.png" alt="Offer Hunter" width="128">
 </p>
 
-Scores how well your resume matches a job posting on BOSS Zhipin or eleduck, then drafts a tailored opener for you. It lives in the browser's side panel, sends nothing but the job you clicked and your own resume to the AI platform you configure, and never sends the message itself — you copy, you paste, you click send.
+Scores how well your resume matches a job posting on the recruiting sites it supports, then drafts a tailored opener for you. It lives in the browser's side panel and sends only the job you clicked and your own resume to the AI platform you configure.
 
 ```text
 resume (Markdown / GitHub Gist) ──┐
-job JD (the one you clicked) ─────┴──> AI match score ──> opener ──> copy, you send
+job JD (the one you clicked) ─────┴──> AI match score ──> tailored opener
 ```
 
 ## Features
 
 - 🎯 **Match scoring** — your resume against the JD, scored 0–100 with the hits and the missing skills; the scoring criteria are yours to write.
 - ✍️ **Tailored openers** — drawn from your real experience, with your own rules taking priority.
-- 📄 **Resume from a Gist** — paste a link or id and it syncs; secret gists included, no token needed.
-- 📋 **Copy, never send** — sending stays your click.
+- 📄 **A resume that keeps itself current** — write Markdown by hand, or point at a Gist and let it sync; secret gists included, no token needed.
 - 🔌 **Your AI, your choice** — DeepSeek / OpenAI / Anthropic / Kimi, or a local model that keeps your resume on your machine.
 - 🧾 **Local job ledger** — results stay on your machine, so revisiting a job costs nothing.
-- 🧭 **Out of the page's way** — the UI lives entirely in the side panel; the only thing in the page is a passive script that listens to the site's own API responses. It never clicks, never fills, never renders UI.
-- 🩺 **Built-in diagnostics** — when the site changes, you see exactly what broke.
-- 🧩 **Pluggable job sites** — BOSS Zhipin (via its API) and eleduck (page DOM only) today; adding one is a directory plus a registry line.
+- 🗂️ **A jobs entry per platform** — the Jobs tab opens each supported platform's job listing page, in that platform's brand colour.
+- 🧭 **Out of the page's way** — the whole UI lives in the browser's side panel; nothing is rendered inside the page.
+- 🩺 **Built-in diagnostics** — when a site changes, you see exactly what broke.
 
 ## Install
 
@@ -83,8 +81,6 @@ Base URL, model and max output tokens are overridable on every preset, and there
 
 The side panel's Jobs tab lists one "open jobs page" button per platform, in that platform's brand colour; open any posting from there and it becomes the job under analysis.
 
-Adding one is a `src/sites/<id>/` directory plus a registry line — see the architecture notes below.
-
 ## Privacy and security
 
 Read this before installing — it is the most important boundary of the project. The full [privacy policy](./docs/privacy-policy.md) (Chinese) maps every claim back to the source file it comes from.
@@ -93,14 +89,14 @@ Read this before installing — it is the most important boundary of the project
 - **A secret gist is not private.** It is merely unlisted and unsearchable, and **anyone holding the link can read it** — no sign-in, no token. Use a private repository if you need real access control.
 - **Credentials sit unencrypted on this machine.** The API key (and the optional Gist token) are stored in the browser's local extension data, readable by anyone who can read the browser profile; use a key with a spending cap.
 - **Data stays on your machine.** There is no backend service; apart from the AI endpoint you configured, nothing is sent anywhere.
-- **Narrow permissions.** Host access is limited to the sites we support (`zhipin.com`, `eleduck.com`), so the extension cannot read any other site you visit.
+- **Narrow permissions.** Host access is limited to the job sites listed above, so the extension cannot read any other site you visit.
 - **You can clear everything.** Options page → AI platforms → clear local data removes the resume, prompts, API key, platform settings and the job ledger; uninstalling does the same.
 
 ## Design boundaries
 
 These are deliberate constraints, not a backlog:
 
-- **No sending on your behalf.** The opener is copied to the clipboard and the send button stays yours. The extension clicks nothing on the page.
+- **No page automation.** The extension only reads; it clicks nothing on the page and injects no interface into it.
 - **No credentials.** Sign-in state lives only in your browser; the extension never fills or reads verification codes.
 - **No signature reversing and no rate-limit circumvention.**
 - **No bulk collection.** Only the posting you clicked is read. There is no crawler, no queue and no background scraping of listings.

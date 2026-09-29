@@ -280,7 +280,7 @@ async function clearAllData() {
             Offer Hunter
           </h1>
           <p class="text-sm text-gray-500">
-            简历对岗位打分、生成打招呼语；每步都由你触发，发送也由你点
+            简历对岗位打分、生成定制打招呼语，每一步都由你触发
           </p>
         </div>
       </header>
