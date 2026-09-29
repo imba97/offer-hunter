@@ -226,6 +226,42 @@ describe('runMigration：校验不通过', () => {
 })
 
 describe('runMigration：旧版本被装回来过', () => {
+  it('旧版本期间新建的简历要被接管（判据两边都归一化，否则永远不相等）', async () => {
+    /*
+     * 这条是真机级后果的回归测试：判据曾经拿「未归一的默认值」去比库里的值，
+     * 而库里的简历必被 ensureSourceConfigs 填成 {gist, paste} —— 永远不相等，
+     * 于是旧版本期间新建的简历不被接管，紧接着旧键被删 = 静默丢失。
+     *
+     * 场景：先迁一次（此时库里没有简历，是默认值）→ 装回旧版本写了简历 →
+     * 再升级回来。
+     */
+    legacy.data = { [AI_KEY]: { platform: 'deepseek', baseUrl: '', apiKey: 'sk-1', model: '', maxTokens: 2048 } }
+    await runMigration()
+    // 库里此时只有 ai 有内容，简历仍是默认值
+    expect((await readRawSetting('resume') as Record<string, unknown>).markdown).toBe('')
+
+    legacy.data = {
+      [RESUME_KEY]: { markdown: '# 旧版本写的简历', sourceId: null, sources: {}, syncedAt: null, syncedKey: null },
+    }
+
+    const result = await runMigration()
+
+    expect(result.status).toBe('merged')
+    expect((await readRawSetting('resume') as Record<string, unknown>).markdown).toBe('# 旧版本写的简历')
+    // 接管之后旧键照旧删掉
+    expect(Object.keys(legacy.data)).toEqual([])
+  })
+
+  it('库里已有真实简历时不被旧键覆盖（IDB 优先）', async () => {
+    legacy.data = legacyData()
+    await runMigration()
+
+    legacy.data = { [RESUME_KEY]: { markdown: '# 旧版本改过的简历' } }
+    await runMigration()
+
+    expect((await readRawSetting('resume') as Record<string, unknown>).markdown).toBe('# 我\n做过支付系统')
+  })
+
   it('按并集合并，冲突以 IndexedDB 为准，并记下合并时间', async () => {
     // 先正常迁一次
     legacy.data = legacyData()

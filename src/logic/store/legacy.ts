@@ -317,24 +317,34 @@ async function mergeLegacyAfterDowngrade(values: Partial<Record<LegacyKeyId, unk
   const docs = new Map(plan.settings.map(setting => [setting.id, setting.value]))
 
   /*
-   * ⚠ 两件事都必须放在**开事务之前**：
+   * ⚠ 判据必须放在**开事务之前**：事务里读取会自己开一个新事务，外层 readwrite 事务
+   *    随即失活，紧接着带 `ctx` 的写就抛 InvalidStateError（§5.3 那条规矩，由
+   *    runMigration 的单测抓出来的）。
    *
-   * 1. 判断「哪些设置还该由旧键接管」。读取不能在事务里做 —— 那会自己开一个新事务，
-   *    外层 readwrite 事务随即失活，紧接着带 `ctx` 的写就抛 InvalidStateError
-   *    （§5.3 那条规矩，由 runMigration 的单测抓出来的）。
-   * 2. 判据是内容，不是「文档是否存在」：首次迁移会把三个默认文档都写进库，
-   *    按「存在即保留」的话，用户在旧版本期间写的提示词就永远进不来了。
+   * ⚠ 判据的**两边都要过同一个归一化**，否则「是否仍是默认值」这句话是假的：
+   *    简历的默认值是 `sources: {}`，而任何写进库的简历都被 `ensureSourceConfigs`
+   *    填成了 `{gist, paste}` —— 拿未归一的默认值去比，**永远不相等**，
+   *    于是旧版本期间新建的简历永远不被接管，紧接着旧键就被删掉 = 静默丢失。
+   *    （真机级后果，评审用「prompts 有测试、resume 没有」这个不对称发现的。）
    */
   const defaults: Record<SettingId, object> = {
     ai: createDefaultAiSettings(),
     resume: createEmptyResume(),
     prompts: createDefaultPromptSettings(),
   }
+
+  /** 按 id 归一成「库里实际会长的样子」——与门面读出来的一致 */
+  const effective = (id: SettingId, raw: unknown): object =>
+    id === 'resume' ? normalizeResumeDoc(raw) : mergeDefaults(raw, defaults[id])
+
+  // 用 stableJson 而不是 JSON.stringify：这个比较不该受键序影响
+  const defaultDigest = (id: SettingId): string => stableJson(effective(id, defaults[id]))
+
   const takeover: SettingId[] = []
   for (const id of ['ai', 'resume', 'prompts'] as const) {
     const current = await readRawSetting(id)
     const isDefault = current === undefined
-      || JSON.stringify(mergeDefaults(current, defaults[id])) === JSON.stringify(defaults[id])
+      || stableJson(effective(id, current)) === defaultDigest(id)
     if (isDefault)
       takeover.push(id)
   }
