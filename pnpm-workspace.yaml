@@ -1,5 +1,14 @@
 minimumReleaseAgeExcludePrune: true
 trustPolicy: no-downgrade
+# 例外名单：这些包不参与「信任降级」检查。
+#
+# why-is-node-running：3.2.2 由维护者 jkoops（维护者名单里的正式成员）本机发布，
+# 因此没有 provenance 证明，而上一版有 —— pnpm 据此判定「疑似被接管」并中止安装。
+# 核对过注册表元数据（发布者、仓库、签名都正常），确认是**良性**的发布方式差异；
+# 它是 vitest 的开发期依赖，不进产物。升级 vitest 5 时需要它，故在此豁免。
+trustPolicyExclude:
+  - why-is-node-running
+
 shellEmulator: true
 # pnpm 10+ 默认不执行依赖的构建脚本，需要在这里显式放行。
 # 参考 btools-vitesse/pnpm-workspace.yaml 的 allowBuilds 写法。
