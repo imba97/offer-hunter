@@ -289,19 +289,16 @@ export function getAllEntries<T>(store: StoreName, ctx?: TxContext): Promise<Arr
  *
  * ⚠ 传进 `fn` 的每个操作都要把 `ctx` 带上，否则它们会各自新开事务 ——
  * 那就没有原子性可言了。
+ *
+ * 这里**直接复用 `withTx`**，而不是自己再开一遍事务：曾经它是一份手写的副本，
+ * 结果 `withTx` 后来补上了「抛错必须显式 abort」，这份副本没有跟着补 ——
+ * 于是事务中途抛错时，已经发出去的写照常提交，调用方却看到失败。
+ * 一份实现只有一个地方需要记住那条规矩。
  */
 export function runTx<T>(
   stores: StoreName[],
   mode: IDBTransactionMode,
   fn: (ctx: TxContext) => Promise<T> | T,
 ): Promise<T> {
-  return retryable(async () => {
-    const db = await openDb()
-    const tx = db.transaction(stores, mode)
-    const ctx: TxContext = { db, tx }
-    const result = await fn(ctx)
-    if (mode === 'readwrite')
-      await txDone(tx)
-    return result
-  })
+  return withTx(stores, mode, fn)
 }

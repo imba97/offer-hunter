@@ -216,6 +216,25 @@ describe('事务与原子性', () => {
     })).rejects.toThrow('迁移中途失败')
   })
 
+  it('抛错时必须**尝试**中止事务（否则已发出的写会照常提交）', async () => {
+    /*
+     * 为什么只断言「尝试」而不是断言「数据没落库」：真正确保回滚的是 abort 能被
+     * 及时调用，而那取决于事务何时提交 —— fake-indexeddb 在微任务排空时提交、
+     * 真实浏览器按任务边界提交，测试环境里这个时序抓不准（见上一条用例的说明）。
+     * 所以这里钉住的是我们自己那部分责任：**发过 abort**。
+     * 这条曾经失守：`runTx` 是 `withTx` 的手写副本，补 abort 时只补了后者。
+     */
+    const abort = vi.spyOn(IDBTransaction.prototype, 'abort')
+
+    await expect(runTx(['settings'], 'readwrite', async (ctx) => {
+      await put('settings', { id: 'ai', value: {}, updatedAt: 'now' }, undefined, ctx)
+      throw new Error('boom')
+    })).rejects.toThrow('boom')
+
+    expect(abort).toHaveBeenCalled()
+    abort.mockRestore()
+  })
+
   it('runTx 成功时全部落库', async () => {
     await runTx(['settings', 'meta', 'records'], 'readwrite', async (ctx) => {
       await put('settings', { id: 'ai', value: {}, updatedAt: 'now' }, undefined, ctx)
