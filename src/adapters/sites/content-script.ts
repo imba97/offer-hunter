@@ -23,6 +23,11 @@ import { isApiSite } from './types'
  *    更新这个岗位，面板只展示并分析它。不遍历列表、不做队列。
  * 2. **注入脚本比隔离世界早跑**（document_start vs document_idle），
  *    直链打开详情页时响应往往落在那个空档里，所以必须主动要一次快照。
+ *
+ * 还有一条同样来自真机故障的约束：**当前岗位只属于产生它的那一页**。
+ * SPA 换页不会重新注入内容脚本，内存里那份岗位会跟着用户走到别的页面 ——
+ * 症状是「切到沟通页，面板还显示最后那个岗位」。因此这里按站点的 `isJobPage`
+ * 判定守住页面归属：离开岗位页就清掉岗位并推给面板，非岗位页上也不再采集。
  */
 
 export function createContentScript(site: JobSiteAdapter): () => void {
@@ -64,6 +69,49 @@ export function createContentScript(site: JobSiteAdapter): () => void {
       window.location.origin,
     )
   }
+
+  // -------------------------------------------------------------------------
+  // 页面归属：当前岗位只属于「会展示岗位」的那一页
+  // -------------------------------------------------------------------------
+
+  /**
+   * 当前地址是不是会展示某一个岗位的页面（判据由站点给出，见 types.ts 的 isJobPage）。
+   *
+   * ⚠ 每次现读 `window.location.href`，不缓存：SPA 换页既没有导航事件也没有
+   *   重新注入，缓存下来的那个值会在用户切页之后继续骗自己。
+   */
+  function onJobPage(): boolean {
+    return site.isJobPage(window.location.href)
+  }
+
+  /** 清掉当前岗位并推给面板；本来就没有岗位时什么都不做（不做无意义的广播） */
+  function clearCurrentJob(): void {
+    if (currentJob.value === null)
+      return
+    currentJob.value = null
+    notifyJobChanged()
+  }
+
+  /**
+   * 地址变化监听：SPA 换页不会重新注入内容脚本，而岗位必须跟着页面走。
+   *
+   * 只在**离开**岗位页时动手（清掉岗位并推给面板）；进入岗位页那一侧不在这里处理 ——
+   * 「什么时候有数据」由接口捕获与 DOM 观察器回答，它们的判据比这里细得多。
+   *
+   * 间隔 1s：一次字符串比较而已，却比等面板下一轮轮询（10s）或观察器的兜底轮询（5s）
+   * 都快，而用户感知不到这 1s。
+   */
+  const URL_WATCH_MS = 1000
+  let lastUrl = window.location.href
+  const urlTimer = window.setInterval(() => {
+    const url = window.location.href
+    if (url === lastUrl)
+      return
+    lastUrl = url
+    if (!site.isJobPage(url))
+      clearCurrentJob()
+  }, URL_WATCH_MS)
+
   /**
    * 用捕获到的详情响应更新当前岗位。
    *
@@ -75,6 +123,16 @@ export function createContentScript(site: JobSiteAdapter): () => void {
    */
   function applyApiView(payload: unknown, naturalKey: string): boolean {
     if (!apiSite)
+      return false
+
+    /*
+     * 非岗位页上捕获到的详情响应一律不认。
+     *
+     * 沟通页里点开某个岗位的详情、或页面被 SPA 保活时残留的请求，都可能让这里
+     * 收到一份「岗位」—— 但用户当前看的不是岗位页，面板就不该亮出岗位
+     *（与 isJobPage 那条不变量同源，见文件头）。
+     */
+    if (!onJobPage())
       return false
 
     const view = apiSite.viewFromApiPayload(payload, naturalKey)
@@ -203,6 +261,16 @@ export function createContentScript(site: JobSiteAdapter): () => void {
   const REFETCH_COOLDOWN_MS = 10_000
 
   async function resolveCurrentJob(force = false): Promise<void> {
+    /*
+     * 非岗位页（沟通页、简历页…）上不存在「当前岗位」：手上那份是上一个页面留下的。
+     * 清掉并推给面板 —— 这是面板切页后还显示旧岗位的最后一道保险（前两道是地址变化
+     * 监听与接口/DOM 两条采集路上的同一判据）。
+     */
+    if (!onJobPage()) {
+      clearCurrentJob()
+      return
+    }
+
     if (currentJob.value && !force)
       return
 
@@ -318,5 +386,6 @@ export function createContentScript(site: JobSiteAdapter): () => void {
   return () => {
     disposeInjectedListener()
     disposeWatcher()
+    window.clearInterval(urlTimer)
   }
 }

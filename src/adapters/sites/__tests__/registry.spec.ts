@@ -7,7 +7,7 @@ import { contentScriptEntries, getJobSite, JOB_SITES } from '../registry'
 import { detectSite, getSiteDescriptor, SITE_DESCRIPTORS, siteMatches, supportedSitesLabel } from '../routing'
 import { siteIdFromPath } from '../site-entry'
 import v2exSite from '../v2ex'
-import { NON_SITE_URLS, SITE_PAGE_URLS } from './urlFixtures'
+import { JOB_PAGE_CASES, JOB_PAGE_FALSE_URLS, NON_SITE_URLS, SITE_PAGE_URLS } from './urlFixtures'
 
 /**
  * 站点注册表与路由的测试。
@@ -99,6 +99,7 @@ describe('适配器（JOB_SITES）', () => {
     const common = [
       'matchUrl',
       'naturalKeyFromUrl',
+      'isJobPage',
       'readJd',
       'jdProbeElement',
       'jdContainerElement',
@@ -226,6 +227,34 @@ describe('getJobSite / detectSite', () => {
         expect(site.matchUrl(url), `${site.meta.id} @ ${String(url)}`)
           .toBe(detectSite(url)?.id === site.meta.id)
       }
+    }
+  })
+
+  /**
+   * 岗位页判定（`isJobPage`）。
+   *
+   * 内容脚本靠它把「当前岗位」绑在产生它的那一页上：地址离开岗位页就清掉岗位。
+   * 因此判错有两个方向，都必须在用例里钉住 —— 尤其是**非岗位页要判 false**，
+   * 那正是「切到沟通页，面板还显示最后一个岗位」的成因。
+   */
+  it('每个站点都声明了哪些地址会展示岗位', () => {
+    for (const site of JOB_SITES) {
+      const cases = JOB_PAGE_CASES[site.meta.id] ?? []
+      // 每个站点都必须有一组用例，否则这条不变量根本没被测
+      expect(cases.length, `缺少 ${site.meta.id} 的岗位页用例`).toBeGreaterThan(0)
+
+      for (const [url, expected] of cases)
+        expect(site.isJobPage(url), `${site.meta.id} @ ${url}`).toBe(expected)
+
+      for (const url of JOB_PAGE_FALSE_URLS)
+        expect(site.isJobPage(url), `${site.meta.id} @ ${url}`).toBe(false)
+    }
+  })
+
+  it('岗位页用例里的地址都得先属于该站点（否则测的是别的站点的判定）', () => {
+    for (const [siteId, cases] of Object.entries(JOB_PAGE_CASES)) {
+      for (const [url] of cases)
+        expect(detectSite(url)?.id, `${siteId} @ ${url}`).toBe(siteId)
     }
   })
 })

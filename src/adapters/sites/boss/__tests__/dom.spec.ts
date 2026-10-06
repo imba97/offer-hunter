@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildDomFallbackJob, EMPTY_JOB_NAME, readJobOutlineFromDom } from '../dom'
+import { buildDomFallbackJob, EMPTY_JOB_NAME, readJdFromDom, readJobOutlineFromDom } from '../dom'
 
 /**
  * DOM 兜底岗位的单测。
@@ -55,6 +55,31 @@ describe('readJobOutlineFromDom', () => {
 
   it('详情容器还没渲染时返回空串', () => {
     document.body.innerHTML = '<div>别的页面</div>'
+    expect(readJobOutlineFromDom()).toEqual({ jobName: '', brandName: '' })
+  })
+})
+
+/**
+ * 独立职位详情页（`/job_detail/<encryptJobId>.html`）**有意不读**。
+ *
+ * 那一页与列表页右侧面板不是一套 DOM：招聘者、公司信息与正文混在 `.job-detail` 里，
+ * 按「短文本 + class 关键词」硬读会读出招聘者与公司信息（真机读到过
+ * 「许建云 刚刚活跃」这种值 —— 面板显示出一份看起来像岗位、字段却全部错位的东西）。
+ *
+ * 因此产品结论是**详情页不展示岗位**（由适配器的 isJobPage 排除），这条用例只钉住
+ * 「读不出来」这件事本身：谁要是想再给详情页加选择器，会先看到这里的理由。
+ */
+describe('独立职位详情页（有意不读）', () => {
+  it('详情页那套 DOM 读不出正文与名字', () => {
+    document.body.innerHTML = `
+      <div class="job-detail">
+        <div class="boss-info">许建云 刚刚活跃</div>
+        <div class="company-info"><span class="name">杭州淘金数科技有限公司</span></div>
+        <div class="job-detail-section"><div class="job-sec-text">岗位职责：写代码</div></div>
+      </div>
+    `
+
+    expect(readJdFromDom()).toBeNull()
     expect(readJobOutlineFromDom()).toEqual({ jobName: '', brandName: '' })
   })
 })

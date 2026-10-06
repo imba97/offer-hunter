@@ -70,3 +70,36 @@ export function securityIdFromUrl(url: string): string {
     return ''
   }
 }
+
+/** 从 URL 里取路径（去掉查询串与 hash）；地址不可解析时返回空串 */
+function pathnameOf(url: string): string {
+  try {
+    return new URL(url, window.location.origin).pathname
+  }
+  catch {
+    return ''
+  }
+}
+
+/**
+ * 是不是职位列表 / 搜索页（`/web/geek/job`，含 `/web/geek/jobs` 与带查询串的形态）。
+ *
+ * 这一页要算岗位页：右侧就是详情面板，用户点开卡片后岗位出现在那里。
+ * 它不依赖页面当前渲染了什么 —— 面板还在加载时也得认，否则那一瞬间捕到的
+ * 详情接口响应会被当成「非岗位页上的数据」丢掉。
+ */
+export function isJobListUrl(url: string): boolean {
+  return pathnameOf(url).startsWith('/web/geek/job')
+}
+
+/**
+ * 是不是独立职位详情页的路径（`/job_detail/<encryptJobId>.html`，
+ * 老形态 `/job_detail/?securityId=…` 也命中）。
+ *
+ * ⚠ 只是「路径像详情页」，**不等于**岗位页：那条路径有时也承载列表页的右侧面板
+ *   （列表页里点卡片后地址会变成它）。两者的区别在页面渲染出来的东西上，
+ *   见适配器里的 isJobPage。
+ */
+export function isJobDetailUrl(url: string): boolean {
+  return pathnameOf(url).startsWith('/job_detail')
+}

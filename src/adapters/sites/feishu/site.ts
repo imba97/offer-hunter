@@ -79,6 +79,13 @@ export function feishuAtsSite(
     // /index/position/7673106028406786331/detail → 7673106028406786331
     naturalKeyFromUrl: positionIdFromUrl,
 
+    /*
+     * 岗位页 = 地址里带着岗位标识的那两种详情形态（见 selectors.ts 的
+     * positionIdFromUrl 注释）。列表页 `/<官网路径>/position` 不算：那里只有列表，
+     * 用户点开一个岗位就换页（站内路由）或另开一页。
+     */
+    isJobPage: url => positionIdFromUrl(url) !== '',
+
     // 捕获到的是响应体原文，飞书招聘的信封是 { code, data }，解包在 toJobView 里做
     viewFromApiPayload: (payload, naturalKey) => toJobView(payload, naturalKey, full),
 

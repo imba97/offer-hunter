@@ -41,6 +41,15 @@ export default defineSite({
   // /posts/z1fRK7 → z1fRK7
   naturalKeyFromUrl: postIdFromUrl,
 
+  /*
+   * 岗位页就是帖子页 `/posts/<slug>`（地址里带着帖子标识）。
+   * 列表页 `/jobs-channel` 不算：那里不会展示某一个岗位的正文，用户点开帖子就换页了。
+   *
+   * ⚠ 与 DOM 层面的判据（selectors.ts 的 isJobPostPage：分类得是招聘类）分工不同：
+   *   这里只回答「地址上有没有一个帖子」，那一页的帖子算不算招聘帖由 readJd 决定。
+   */
+  isJobPage: url => postIdFromUrl(url) !== '',
+
   readJd: readJdFromDom,
 
   jdProbeElement: getPostBody,

@@ -44,6 +44,17 @@ export default defineSite({
   // /t/1245478 → 1245478
   naturalKeyFromUrl: topicIdFromUrl,
 
+  /*
+   * 岗位页就是主题页 `/t/<id>`（地址里带着帖子 id）。节点页 `/go/jobs` 不算：
+   * 那里只有列表，正文与标题都不在。
+   *
+   * ⚠ 与 DOM 层面的判据（selectors.ts 的 isJobPostPage：节点得是「酷工作」）分工
+   *   不同：这里只回答「地址上有没有一个主题」，这个主题算不算工作帖由 readJd 决定。
+   *   V2EX 里别的节点的主题页因此会「是岗位页但没有岗位」—— 这是对的：
+   *   那种页面上不该显示上一个岗位。
+   */
+  isJobPage: url => topicIdFromUrl(url) !== '',
+
   readJd: readJdFromDom,
 
   /*

@@ -6,6 +6,8 @@ import { fetchJobDetail, fetchJobView, JOB_DETAIL_API, toJobView } from './api'
 import { buildDomFallbackJob, getJdElement, readJdFromDom, readJobOutlineFromDom } from './dom'
 import meta from './meta'
 import {
+  isJobDetailUrl,
+  isJobListUrl,
   JOB_COMPANY_SELECTORS,
   JOB_DETAIL_BOX,
   JOB_DETAIL_DESC,
@@ -43,6 +45,25 @@ export default defineSite({
   matchUrl: url => isHostOf(hostnameOf(url), meta.hostnames),
 
   naturalKeyFromUrl: securityIdFromUrl,
+
+  /*
+   * 会展示某一个岗位的页面（见 sites/types.ts 的 isJobPage）。
+   *
+   * 两条判据：
+   *  1. **职位列表 / 搜索页**（`/web/geek/job…`）恒为真 —— 右侧就是详情面板
+   *  2. **`/job_detail…` 要看页面现状**：这条路径下有两种截然不同的东西 ——
+   *     列表页点卡片后留在原页的右侧面板（同一个地址，DOM 就是列表页那套），
+   *     以及**独立的职位详情页**。后者我们**不认**（`readJdFromDom()` 在那页上
+   *     读不出列表页面板的正文）：它的 DOM 结构与列表页不同，硬读出来的岗位名/
+   *     公司名与真实岗位对不上（真机读到过招聘者与公司信息），
+   *     与其展示一份错的，不如让面板老实地显示「还没有选中岗位」。
+   *
+   * 判据用「现在读得出正文」而不是「`/job_detail` 一律不算」，是为了不误伤列表页：
+   * 两边地址完全一样时，只有页面渲染出来的东西能区分它们。
+   * 沟通页（`/web/geek/chat`）两边都不属于 —— 内容脚本靠这条把上一个页面的
+   * 岗位清掉（见 sites/content-script.ts）。
+   */
+  isJobPage: url => isJobListUrl(url) || (isJobDetailUrl(url) && readJdFromDom() !== null),
 
   // 捕获到的是响应体原文，BOSS 的信封是 { code, zpData }，解包在这里做
   viewFromApiPayload: (payload, naturalKey) => toJobView((payload as any)?.zpData, naturalKey),

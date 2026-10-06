@@ -41,6 +41,42 @@ function mountDetail(jd: string, title = '高级后端工程师', company = '某
   `
 }
 
+/**
+ * 独立职位详情页（`/job_detail/<encryptJobId>.html`）的 DOM。
+ *
+ * 真机结构：整块内容在 `.job-detail` 里，招聘者/公司信息与 `.job-detail-section`
+ * 里的 `.job-sec-text` 正文混在一起。
+ *
+ * ⚠ 这一页**不是**列表页那套（右侧面板用 `.job-detail-box > .job-detail-body > .desc`），
+ *   两者字段位置不同 —— 照着它硬读会读出招聘者之类的错值。产品结论是这一页不展示
+ *   岗位（见下面「独立职位详情页」那一组用例），这个夹具就是用来钉住这条的：
+ *   页面里明明有 JD 文案，也不该变成岗位。
+ */
+function mountJobDetailPage(jd: string, title = '高级后端工程师', company = '某某科技'): void {
+  document.body.innerHTML = `
+    <div class="job-detail">
+      <div class="info-primary">
+        <div class="name"><h1>${title}</h1><span class="salary">25-40K</span></div>
+      </div>
+      <div class="company-info"><a class="name" href="/gongsi/x~.html">${company}</a></div>
+      <div class="job-detail-section">
+        <h3>职位描述</h3>
+        <div class="job-sec-text">${jd}</div>
+      </div>
+    </div>
+  `
+}
+
+/**
+ * 把 `window.location` 指到某个地址。
+ *
+ * jsdom 里给 `location.href` 赋值等于请求导航（直接报「未实现」），只能整个换成桩。
+ * 内容脚本会现读 `location.href` 判断「这一页是不是岗位页」，因此地址是用例的一部分。
+ */
+function stubLocation(href: string): void {
+  vi.stubGlobal('location', { href, origin: 'https://www.zhipin.com' })
+}
+
 /** 在**同一个容器内**改 JD —— 真实 SPA 切换岗位就是这样更新的 */
 function setJd(jd: string): void {
   const desc = document.querySelector('.desc')
@@ -94,13 +130,19 @@ beforeEach(() => {
   captured.sent.length = 0
   // jsdom 的 visibilityState 不保证是 visible，显式放开，避免 check 被后台跳过
   Object.defineProperty(document, 'hidden', { value: false, configurable: true })
+  /*
+   * 内容脚本只在「会展示岗位的地址」上采集（见适配器的 isJobPage）。jsdom 的默认地址
+   * 不是岗位页，不指过去的话每个用例都等价于「在沟通页上」，什么都读不到。
+   * 这一行的存在本身就是那条不变量的说明：岗位数据是按页面归属的。
+   */
+  stubLocation('https://www.zhipin.com/web/geek/jobs')
 })
 
 afterEach(() => {
   dispose?.()
   dispose = null
   vi.useRealTimers()
-  // 有的用例会给 window.location 打桩（模拟地址栏上的 securityId），用完必须还原
+  // 用例会给 window.location 打桩（模拟地址栏上的 securityId / 换成沟通页），用完必须还原
   vi.unstubAllGlobals()
   document.body.innerHTML = ''
 })
@@ -320,10 +362,7 @@ describe('强制刷新', () => {
     expect(before.site.ids?.securityId).toBe('sid-a')
 
     // 地址栏换成了另一个 securityId → 不是「认不出」，而是明确是另一个岗位
-    vi.stubGlobal('location', {
-      href: 'https://www.zhipin.com/job_detail/?securityId=sid-b',
-      origin: 'https://www.zhipin.com',
-    })
+    stubLocation('https://www.zhipin.com/job_detail/?securityId=sid-b')
 
     const refreshed = await currentJob(true)
 
@@ -384,5 +423,131 @@ describe('切换岗位', () => {
 
     // 内容没变长（是被折叠），不该有任何推送
     expect(captured.sent.filter(m => m.type === 'job-changed')).toHaveLength(0)
+  })
+})
+
+/**
+ * 独立职位详情页（`/job_detail/<encryptJobId>.html`）：**不再是岗位页**。
+ *
+ * 这一页与列表页右侧面板不是同一套 DOM，硬读出来的岗位名/公司名对不上真岗位
+ *（真机读到过招聘者与公司信息），因此产品上的结论是「详情页不展示」：
+ * 面板显示「还没有选中岗位」，而不是一份看起来像岗位、其实字段错位的东西。
+ *
+ * ⚠ 判据是页面的地址与现状（见适配器的 isJobPage），不是「读不读得到正文」——
+ *   下面第一条用例里详情页的 DOM 里**确实有** JD 文案，但它不该变成岗位。
+ */
+describe('独立职位详情页', () => {
+  it('详情页不产生岗位（页面里的 JD 文案不算数）', async () => {
+    stubLocation('https://www.zhipin.com/job_detail/e2305163cf88e8420nN93NS0GFVT.html')
+    mountJobDetailPage('岗位职责：负责跨境电商系统的后端开发')
+
+    dispose = createContentScript(bossSite)
+
+    expect(await currentJob()).toBeNull()
+  })
+
+  it('详情页上正文变化也不会被观察成岗位', async () => {
+    stubLocation('https://www.zhipin.com/job_detail/e2305163cf88e8420nN93NS0GFVT.html')
+    mountJobDetailPage('短 JD')
+    dispose = createContentScript(bossSite)
+
+    const desc = document.querySelector('.job-sec-text')
+    if (!desc)
+      throw new Error('详情页的正文容器不存在')
+    desc.textContent = '短 JD，另外还有任职要求：三年以上经验'
+    await vi.advanceTimersByTimeAsync(5000)
+
+    expect(await currentJob()).toBeNull()
+    expect(captured.sent.filter(m => m.type === 'job-changed')).toHaveLength(0)
+  })
+
+  it('详情页上捕获到详情接口响应也不认', async () => {
+    stubLocation('https://www.zhipin.com/job_detail/e2305163cf88e8420nN93NS0GFVT.html')
+    dispose = createContentScript(bossSite)
+
+    pushApiResponse('sid-1', '接口岗位', '接口里的 JD')
+    await vi.advanceTimersByTimeAsync(150)
+
+    expect(await currentJob()).toBeNull()
+  })
+})
+
+/**
+ * 页面归属：**当前岗位只属于产生它的那一页**。
+ *
+ * 真机故障：同一个标签页里从职位页切到沟通页（`/web/geek/chat`）之后，面板显示的
+ * 还是最后一个岗位 —— 岗位是上一个页面的内存状态，而 SPA 换页不会重新注入内容脚本，
+ * 于是它会一直跟着用户走下去。反过来，沟通页上就该是「还没有选中岗位」。
+ */
+describe('页面归属', () => {
+  it('地址切到沟通页时清掉岗位，并把「没有岗位」推给面板', async () => {
+    mountDetail('岗位 A 的 JD')
+    dispose = createContentScript(bossSite)
+    expect((await currentJob())?.jdText).toBe('岗位 A 的 JD')
+    captured.sent.length = 0
+
+    // SPA 换页：只换地址，不重新注入内容脚本
+    stubLocation('https://www.zhipin.com/web/geek/chat')
+    await vi.advanceTimersByTimeAsync(1100)
+
+    expect(await currentJob()).toBeNull()
+    // 面板是靠这条推送清空的，不能只在面板来问时才清
+    expect(captured.sent.some(m => m.type === 'job-changed')).toBe(true)
+    expect(lastPushedJob()).toBeNull()
+  })
+
+  it('从列表页（右侧面板）点到独立详情页时清掉岗位', async () => {
+    // 列表页：右边就是详情面板，岗位正常
+    mountDetail('岗位 A 的 JD')
+    dispose = createContentScript(bossSite)
+    expect((await currentJob())?.jdText).toBe('岗位 A 的 JD')
+    captured.sent.length = 0
+
+    // 用户点开岗位、跳到了独立详情页：上面那套面板没了，详情页不算岗位页
+    stubLocation('https://www.zhipin.com/job_detail/e2305163cf88e8420nN93NS0GFVT.html')
+    mountJobDetailPage('岗位 A 的 JD')
+    await vi.advanceTimersByTimeAsync(1100)
+
+    expect(await currentJob()).toBeNull()
+    expect(lastPushedJob()).toBeNull()
+  })
+
+  it('沟通页上即使 SPA 保活着旧详情面板，也不会把它当成岗位', async () => {
+    stubLocation('https://www.zhipin.com/web/geek/chat')
+    // 上一个页面（列表页）的详情面板还在 DOM 里，只是被藏起来了 —— 正文仍然读得到
+    mountDetail('上一个岗位的 JD')
+
+    dispose = createContentScript(bossSite)
+
+    expect(await currentJob()).toBeNull()
+
+    // 观察器那条路同样不能把它捡回来（5s 兜底轮询之后也一样）
+    setJd('上一个岗位的 JD，改了一下')
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(await currentJob()).toBeNull()
+  })
+
+  it('沟通页上捕获到详情接口响应也不认', async () => {
+    stubLocation('https://www.zhipin.com/web/geek/chat')
+    dispose = createContentScript(bossSite)
+
+    pushApiResponse('sid-1', '接口岗位', '接口里的 JD')
+    await vi.advanceTimersByTimeAsync(150)
+
+    expect(await currentJob()).toBeNull()
+    expect(captured.sent.filter(m => m.type === 'job-changed')).toHaveLength(0)
+  })
+
+  it('回到职位页后岗位照常恢复（清掉不是拉黑）', async () => {
+    mountDetail('岗位 A 的 JD')
+    dispose = createContentScript(bossSite)
+
+    stubLocation('https://www.zhipin.com/web/geek/chat')
+    await vi.advanceTimersByTimeAsync(1100)
+    expect(await currentJob()).toBeNull()
+
+    // 用户又切回了职位页：岗位重新读得出来
+    stubLocation('https://www.zhipin.com/web/geek/jobs')
+    expect((await currentJob())?.jdText).toBe('岗位 A 的 JD')
   })
 })

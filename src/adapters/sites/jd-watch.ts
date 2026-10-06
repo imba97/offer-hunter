@@ -14,6 +14,10 @@ import type { JobView } from '~/logic/types'
  *     也不要把新 JD 记到旧岗位的账本上（那会污染去重依据）
  *  3. **不错认岗位**：只有 DOM 数据之间切换时才重置身份，并带上 URL 上的标识
  *
+ * 还有一条**页面归属**上的前置条件：地址已经不是岗位页（见适配器的 isJobPage）时
+ * 一个字符都不读。这条不能省：SPA 会把上一个页面的详情面板保活在 DOM 里（只是隐藏），
+ * 于是沟通页上照样「读得到 JD」—— 读下去就等于把上一个岗位又摆回面板。
+ *
  * ⚠ 这三条规则**互相耦合**：改动「什么时候读」会改变「读完那一刻面板上显示的是哪一版
  *   文本」，进而让规则 1 的比较前提失效。此前试过在此处加读取频率限制（把昂贵读推迟到
  *   DOM 安静之后），结果同时打破了规则 1 与规则 2 —— 详见那次回退的结论。要动这段逻辑，
@@ -57,6 +61,13 @@ export function watchJdChanges(opts: JdWatchOptions): () => void {
   const check = () => {
     // 页面在后台时不必读（重新可见后由兜底轮询补上）
     if (document.hidden)
+      return
+
+    /*
+     * 非岗位页上不读正文：SPA 保活的旧详情面板照样「有 JD」，读它就是把上一个岗位
+     * 重新摆回面板（见文件头）。地址是现读的，因为 SPA 换页不会重建这个模块。
+     */
+    if (!site.isJobPage(window.location.href))
       return
 
     const probe = site.jdProbeElement()
