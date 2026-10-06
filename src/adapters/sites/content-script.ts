@@ -1,10 +1,10 @@
 import type { InjectedEntry } from './injected-protocol'
 import type { JobSiteAdapter } from './types'
-import type { DiagnosticResult } from '~/logic/types'
 import { reactive } from 'vue'
 import { onMessage, sendMessage } from 'webext-bridge/content-script'
-import { jobIdentity, recordKey } from '~/logic/types'
+import { collectDiagnostic } from './diagnostics'
 import { asInjectedMessage, INJECTED_CHANNEL } from './injected-protocol'
+import { watchJdChanges } from './jd-watch'
 import { isApiSite } from './types'
 
 /**
@@ -183,165 +183,6 @@ export function createContentScript(site: JobSiteAdapter): () => void {
   // DOM 兜底
   // -------------------------------------------------------------------------
 
-  /** 兜底轮询间隔：观察器失联（SPA 换节点）或漏事件时把状态追回来 */
-  const JD_FALLBACK_POLL_MS = 5000
-  /** 详情容器还没渲染出来时的重试间隔 */
-  const JD_ATTACH_RETRY_MS = 500
-  /** 突变合并窗口：一次渲染会产生几十条记录，没必要每条都去读一遍文本 */
-  const JD_MUTATION_DEBOUNCE_MS = 120
-
-  /**
-   * DOM 回退：监听详情面板里的 JD 文本变化。
-   *
-   * 触发方式：**MutationObserver 为主**（JD 一变就读，不再有定时器盲区），
-   * 5s 兜底轮询负责「容器被 SPA 换掉、观察器失联」这类情况；
-   * 容器尚未渲染时用 500ms 的小间隔重试挂载。
-   *
-   * 三条规则，都是为了避免「用不可靠的数据覆盖可靠的数据」：
-   *  1. **不降级**：同一岗位时，只有新文本更完整才覆盖（DOM 常常是折叠/截断版）
-   *  2. **不丢身份**：已有接口数据时，认不出是同一岗位就原样保留 —— 宁可显示旧岗位，
-   *     也不要把新 JD 记到旧岗位的账本上（那会污染去重依据）
-   *  3. **不错认岗位**：只有 DOM 数据之间切换时才重置身份，并带上 URL 上的标识
-   */
-  function watchJdChanges(): () => void {
-    let lastSignature = ''
-    let lastJd = ''
-    let observer: MutationObserver | null = null
-    let observedBox: Element | null = null
-    let attachTimer: number | null = null
-    let debounceTimer: number | null = null
-
-    const check = () => {
-      // 页面在后台时不必读（重新可见后由兜底轮询补上）
-      if (document.hidden)
-        return
-
-      const probe = site.jdProbeElement()
-      if (!probe)
-        return
-
-      /*
-       * 廉价前置判断：只读长度与首尾片段。
-       * 读 textContent 不触发样式计算，而下面的 cleanText 要克隆节点并对
-       * 每个元素取计算样式 —— 绝大多数突变都会在这里被挡掉。
-       */
-      const raw = probe.textContent ?? ''
-      if (!raw)
-        return
-      const signature = `${raw.length}|${raw.slice(0, 40)}|${raw.slice(-20)}`
-      if (signature === lastSignature)
-        return
-      lastSignature = signature
-
-      const jd = site.readJd()
-      if (!jd || jd === lastJd)
-        return
-      lastJd = jd
-
-      const existing = currentJob.value
-      const sameJob = existing ? site.sameJob(existing, jd) : false
-
-      if (existing && !sameJob && existing.source === 'api') {
-        // eslint-disable-next-line no-console
-        console.info('[offer-hunter] DOM 里的 JD 与已捕获的岗位不一致，保留接口数据')
-        return
-      }
-
-      const outline = site.readOutline()
-
-      if (existing && sameJob) {
-        if (jd.length <= existing.jdText.length)
-          return
-        currentJob.value = site.buildDomFallback(jd, existing, outline)
-      }
-      else {
-        /*
-         * 此前没有岗位，或是在 DOM 数据之间切换：重置身份，只带 URL 上的标识。
-         * 地址上没有标识时，共用的兜底骨架会按岗位内容定一个本地身份并钉住它
-         * （见 sites/dom-fallback.ts）—— 没有身份就没有账本键。
-         */
-        const naturalKey = site.naturalKeyFromUrl(window.location.href)
-        currentJob.value = site.buildDomFallback(
-          jd,
-          naturalKey ? { site: site.emptyRef(naturalKey) } : null,
-          outline,
-        )
-      }
-
-      // eslint-disable-next-line no-console
-      console.info('[offer-hunter] 从 DOM 回退更新了 JD')
-      notifyJobChanged()
-    }
-
-    /** 合并短时间内的多次突变 */
-    const scheduleCheck = () => {
-      if (debounceTimer !== null)
-        return
-      debounceTimer = window.setTimeout(() => {
-        debounceTimer = null
-        check()
-      }, JD_MUTATION_DEBOUNCE_MS)
-    }
-
-    /**
-     * 让观察器盯上详情容器。
-     *
-     * 返回是否已挂上：容器还没渲染出来、或已被 SPA 换掉（旧节点脱离文档）时返回 false，
-     * 交给重试/兜底轮询处理。
-     */
-    const ensureObserver = (): boolean => {
-      const box = site.jdContainerElement()
-      if (!box)
-        return false
-      if (observer && observedBox === box && box.isConnected)
-        return true
-
-      observer?.disconnect()
-      observer = new MutationObserver(scheduleCheck)
-      observer.observe(box, { childList: true, subtree: true, characterData: true })
-      observedBox = box
-      return true
-    }
-
-    const startAttachRetry = () => {
-      if (attachTimer !== null)
-        return
-      attachTimer = window.setInterval(() => {
-        if (!ensureObserver())
-          return
-        if (attachTimer !== null) {
-          window.clearInterval(attachTimer)
-          attachTimer = null
-        }
-        check()
-      }, JD_ATTACH_RETRY_MS)
-    }
-
-    const pollTimer = window.setInterval(() => {
-      if (!ensureObserver()) {
-        startAttachRetry()
-        return
-      }
-      check()
-    }, JD_FALLBACK_POLL_MS)
-
-    if (!ensureObserver())
-      startAttachRetry()
-    else
-      check()
-
-    return () => {
-      observer?.disconnect()
-      observer = null
-      observedBox = null
-      window.clearInterval(pollTimer)
-      if (attachTimer !== null)
-        window.clearInterval(attachTimer)
-      if (debounceTimer !== null)
-        window.clearTimeout(debounceTimer)
-    }
-  }
-
   // -------------------------------------------------------------------------
   // 取数与诊断
   // -------------------------------------------------------------------------
@@ -441,103 +282,30 @@ export function createContentScript(site: JobSiteAdapter): () => void {
     currentJob.value = site.buildDomFallback(domJd, base, site.readOutline())
   }
 
-  /**
-   * 收集诊断信息。
-   *
-   * 站点自己贡献选择器命中情况（site.diagnose）；通用部分（捕获记录、
-   * 接口契约探针）在这里组装。
-   *
-   * 刻意抽成独立函数：把这段逻辑内联在 onMessage 回调里会让 TypeScript 在
-   * 推导回调类型时退化（表现为 "This expression is not callable"）。
-   */
-  async function collectDiagnostic(): Promise<DiagnosticResult> {
-    const job = currentJob.value
-    const siteDiag = site.diagnose()
-
-    const result: DiagnosticResult = {
-      url: window.location.href,
-      capturedApis: capturedApis.map(a => ({
-        url: a.url,
-        ok: a.ok,
-        keys: a.keys,
-        error: a.error,
-      })),
-      hasCurrentJob: job !== null,
-      currentJobName: job?.job.title ?? null,
-      currentJobSource: job?.source ?? null,
-      // 面板就是按这个键查分析结果的：它长什么样，直接决定面板能不能显示出来
-      currentJobKey: job ? recordKey(jobIdentity(job)) : null,
-      jdLength: job?.jdText.length ?? 0,
-      detailProbe: null,
-      selectors: [],
-    }
-
-    // 详情接口探针：验证「标识 → JD」这条契约是否仍然成立
-    // （DOM-only 站点没有接口契约可验，探针保持 null，面板据此换一段说明）
-    const naturalKey = job?.site.naturalKey ?? ''
-    if (apiSite && naturalKey) {
-      try {
-        const probe = await apiSite.probeDetail(naturalKey)
-        result.detailProbe = {
-          naturalKey,
-          ok: true,
-          hasPostDescription: probe.hasDescription,
-          jdPreview: probe.preview,
-        }
-      }
-      catch (error) {
-        result.detailProbe = {
-          naturalKey,
-          ok: false,
-          hasPostDescription: false,
-          jdPreview: '',
-          error: error instanceof Error ? error.message : String(error),
-        }
-      }
-    }
-
-    result.selectors = siteDiag.selectors.map((probe) => {
-      let count = 0
-      try {
-        count = document.querySelectorAll(probe.selector).length
-      }
-      catch {
-        count = 0
-      }
-      // 逐字透传站点的探针（含 key 与 label），只补命中情况
-      return { ...probe, found: count > 0, count }
-    })
-
-    const jd = site.readJd()
-    if (jd) {
-      result.selectors.push({
-        key: 'currentJd',
-        label: '详情面板当前 JD',
-        selector: '（已读取到文本）',
-        found: true,
-        count: jd.length,
-      })
-    }
-
-    // DOM 兜底能读到的岗位标识：真机复验关键词选择器是否还有效
-    result.domOutline = siteDiag.domOutline
-
-    return result
-  }
-
   // -------------------------------------------------------------------------
   // 注册
   // -------------------------------------------------------------------------
 
   const disposeInjectedListener = installInjectedListener()
-  const disposeWatcher = watchJdChanges()
+  const disposeWatcher = watchJdChanges({
+    site,
+    getJob: () => currentJob.value,
+    // ⚠ 赋值给已有的 reactive 容器，而不是换引用
+    setJob: (job) => { currentJob.value = job },
+    onJobChanged: notifyJobChanged,
+  })
 
   onMessage('request-current-job', async ({ data }) => {
     await resolveCurrentJob(Boolean(data?.force))
     return { job: currentJob.value, url: window.location.href }
   })
 
-  onMessage('run-diagnostic', async () => await collectDiagnostic())
+  onMessage('run-diagnostic', async () => await collectDiagnostic({
+    site,
+    apiSite,
+    job: currentJob.value,
+    capturedApis,
+  }))
 
   // eslint-disable-next-line no-console
   console.info(`[offer-hunter] 内容脚本已注入（${site.meta.id}）`)
