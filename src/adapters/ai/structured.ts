@@ -4,10 +4,13 @@ import type { AiProvider, ChatMessage } from './types'
  * 结构化输出的策略选择。
  *
  * 上层只要「给我一个 T」，由这里根据 provider.capabilities 决定怎么要：
- *  - json_object：请求体带 response_format，并确保 prompt 出现 "json"
- *    （DeepSeek 官方要求，否则可能返回空对象）
- *  - json_schema / tool / prompt：当前实现统一退化为 prompt 约束 + 容错解析。
- *    各家的严格模式 wire 格式差异较大，留待需要时在 adapter 内补齐。
+ *  - `nativeJson: true`：让协议去用它自己那套原生结构化输出（OpenAI 发
+ *    `response_format: json_object`、DeepSeek 同理）。无论走哪家，prompt 里都会
+ *    带上 "json" 字样 —— DeepSeek 官方要求如此，否则可能返回空对象。
+ *  - `nativeJson: false`：纯靠 prompt 约束 + 容错解析。
+ *
+ * ⚠ 契约只回答「这家平台有没有原生 JSON 输出」；**用哪种机制是各协议的内部事**
+ *   （见 types.ts 的 AiProviderCapabilities.nativeJson）。
  */
 
 export interface JsonRequestOptions {
@@ -64,17 +67,14 @@ export function parseJsonLoose<T>(text: string): T {
   throw new Error(`无法从模型返回中解析出 JSON：${trimmed.slice(0, 200)}`)
 }
 
-export async function requestJson<T>(
-  provider: AiProvider,
-  opts: JsonRequestOptions,
-): Promise<T> {
-  const capabilities = provider.capabilities
-  const useJsonMode = capabilities.structuredOutput === 'json_object'
-    || capabilities.structuredOutput === 'json_schema'
-
-  // DeepSeek 等平台要求 prompt 中出现 "json" 字样才会启用 JSON 输出。
-  // 这里统一加上，无害且必要。
-  const system = [
+/**
+ * 拼出最终发给模型的 system prompt（含 JSON 输出要求）。
+ *
+ * DeepSeek 等平台要求 prompt 中出现 "json" 字样才会启用 JSON 输出。这里统一加上，
+ * 无害且必要。
+ */
+export function buildJsonSystem(opts: Pick<JsonRequestOptions, 'system' | 'schemaHint'>): string {
+  return [
     opts.system,
     '',
     '输出要求：',
@@ -82,6 +82,39 @@ export async function requestJson<T>(
     '- 不要用 markdown 代码块包裹',
     opts.schemaHint,
   ].join('\n')
+}
+
+/**
+ * 这次请求里**与简历 / JD 内容无关**的固定字符数：system、消息包装，以及空消息
+ * 本身占位的字符。
+ *
+ * 存在的意义：调用方要按平台的 `maxInputChars` 裁剪简历与 JD，而预算必须扣掉这些
+ * 固定开销 —— 否则「用户把自定义提示词写得很长」这件事完全不进预算，裁剪结果照样超限。
+ *
+ * ⚠ 让这个函数**报告真实开销**，而不是在调用方那边估一个常量：估出来的常量会随着
+ *   system 文案改动静默失准（此前 matching.ts 里那个 `PROMPT_RESERVE = 2000` 就是
+ *   这么来的）。
+ *
+ * `placeholderChars` 是调用方在「空载荷」里放的占位字符数（例如用 `（无）` 顶替简历
+ * 与 JD 各一处）——真实载荷长度由调用方自己扣掉，占位本身不是固定开销，所以要减掉。
+ */
+export function jsonRequestOverhead(
+  opts: Pick<JsonRequestOptions, 'system' | 'schemaHint'>,
+  emptyUserChars: number,
+  placeholderChars = 0,
+): number {
+  return buildJsonSystem(opts).length + emptyUserChars - placeholderChars
+}
+
+export async function requestJson<T>(
+  provider: AiProvider,
+  opts: JsonRequestOptions,
+): Promise<T> {
+  const capabilities = provider.capabilities
+  // 有原生 JSON 输出就打开它；没有则完全靠下面的 prompt 约束 + 容错解析
+  const useJsonMode = capabilities.nativeJson
+
+  const system = buildJsonSystem(opts)
 
   const messages: ChatMessage[] = [{ role: 'user', content: opts.user }]
 

@@ -187,10 +187,15 @@ function handleSynced(content: ResumeContent): void {
   })
 
   const field = props.adapter.itemField
-  if (!field || !content.label)
+  /*
+   * 回写用 `content.item`（能与 items 对上的那个键），不用 `label` ——
+   * label 是展示文案，来源完全可以把它写成「已自动挑选」这类装饰串。
+   * 契约见 adapters/resume-sources/types.ts 的 ResumeContent。
+   */
+  if (!field || !content.item)
     return
-  if (content.label !== str(props.config[field]))
-    update({ [field]: content.label })
+  if (content.item !== str(props.config[field]))
+    update({ [field]: content.item })
 }
 
 /** 换一份内容：写进配置即可，watch 会带着新值重新同步 */

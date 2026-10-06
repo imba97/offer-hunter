@@ -89,14 +89,18 @@ export interface ResolvedConfig {
  */
 export interface AiProviderCapabilities {
   /**
-   * 结构化输出的实现方式：
-   *  - json_schema  最严格，OpenAI 支持
-   *  - json_object  只保证是合法 JSON，不保证 schema；DeepSeek 属此类，
-   *                 且要求 prompt 里必须出现 "json" 字样，否则会返回空对象
-   *  - tool         靠 tool use 强制结构，Anthropic 走这条
-   *  - prompt       纯靠 prompt 约束 + 容错解析
+   * 这家平台能不能**按 schema 输出 JSON**。
+   *
+   * ⚠ 这里刻意是布尔而不是「用了哪种机制」的枚举：`json_schema`（OpenAI）、
+   *   `json_object`（DeepSeek）、tool use（Anthropic）是**同一种能力的三家实现**，
+   *   而「纯靠 prompt 约束」是**没有这种能力**。此前枚举把它们并列，于是
+   *   `structuredOutput: 'tool'` 变成一个悬空的承诺 —— 上层只认其中两个值，
+   *   而 Anthropic 协议也从没接过 tool use，注释与实现长期不一致。
+   *
+   *   选哪种机制是**各协议自己的事**（OpenAI 协议发 `response_format`，
+   *   Anthropic 协议将来要发 `tools` 也是它自己的选择），契约只回答「有没有」。
    */
-  structuredOutput: 'json_schema' | 'json_object' | 'tool' | 'prompt'
+  nativeJson: boolean
   /**
    * 单次请求可接受的最大输入字符数。
    *

@@ -14,7 +14,7 @@ import { defineAiPlatform } from '../types'
  * 「连接测试正常但回显空」「报模型返回了空内容」的根因。
  * 本项目场景（匹配打分、招呼语生成）都是短输出，因此默认关闭思考。
  *
- * 能力：只有 json_object（无 json_schema），且要求 prompt 中出现 "json" 字样。
+ * 能力：有原生 JSON 输出（json_object；无 json_schema），且要求 prompt 中出现 "json" 字样。
  */
 export default defineAiPlatform({
   id: 'deepseek',
@@ -22,7 +22,7 @@ export default defineAiPlatform({
   protocol: createOpenAIProtocol(),
   defaultBaseUrl: 'https://api.deepseek.com/v1',
   defaultModel: 'deepseek-flash',
-  capabilities: { structuredOutput: 'json_object', maxInputChars: 60_000 },
+  capabilities: { nativeJson: true, maxInputChars: 60_000 },
   thinkingToggle: true,
   label: 'DeepSeek',
   hint: '中文好、价格低',

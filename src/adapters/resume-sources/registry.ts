@@ -1,4 +1,5 @@
 import type { ResumeSourceAdapter, ResumeSourceId } from './types'
+import { collectAdapters } from '../collect'
 
 /**
  * 简历来源注册表。
@@ -15,15 +16,14 @@ import type { ResumeSourceAdapter, ResumeSourceId } from './types'
  * 人的起点），其余按目录路径排序（稳定，且不依赖文件系统的返回顺序）。
  */
 export const RESUME_SOURCES: ResumeSourceAdapter[] = (() => {
-  const all = Object.entries(
+  const all = collectAdapters(
     import.meta.glob<{ default: ResumeSourceAdapter }>('./*/index.ts', { eager: true }),
   )
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([, mod]) => mod.default)
 
-  const local = all.filter(source => source.contentSource === 'local')
+  // 手动编辑（内容在本地）固定排第一；其余保持路径序
+  const manual = all.filter(source => source.contentSource === 'local')
   const remote = all.filter(source => source.contentSource !== 'local')
-  return [...local, ...remote]
+  return [...manual, ...remote]
 })()
 
 /** 按 id 取适配器；未知 id 返回 undefined（存储里可能残留已废弃的来源） */

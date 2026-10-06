@@ -11,7 +11,7 @@ export default defineAiPlatform({
   protocol: createAnthropicProtocol({ authStyle: 'bearer' }),
   defaultBaseUrl: 'https://api.kimi.com/coding',
   defaultModel: 'k3',
-  capabilities: { structuredOutput: 'prompt', maxInputChars: 120_000 },
+  capabilities: { nativeJson: false, maxInputChars: 120_000 },
   thinkingToggle: false,
   label: 'Kimi',
   hint: '月之暗面出品，长上下文',

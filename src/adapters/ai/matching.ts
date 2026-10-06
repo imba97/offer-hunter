@@ -2,7 +2,7 @@ import type { AiProvider } from '~/adapters/ai/platforms'
 import type { PingResult } from '~/adapters/ai/types'
 import type { AiSettings, JobCore, MatchResult, Resume } from '~/logic/types'
 import { createAiProvider } from '~/adapters/ai/platforms'
-import { requestJson } from '~/adapters/ai/structured'
+import { jsonRequestOverhead, requestJson } from '~/adapters/ai/structured'
 
 /**
  * 匹配与招呼语生成。
@@ -53,8 +53,6 @@ export async function testAiConnection(settings: AiSettings): Promise<PingResult
 // 输入裁剪
 // ---------------------------------------------------------------------------
 
-/** 留给 system prompt 与输出要求的字符余量 */
-const PROMPT_RESERVE = 2_000
 /** JD 最多占可用预算的比例 —— 简历才是判断主体，JD 通常也只有一两千字 */
 const JD_BUDGET_RATIO = 0.4
 
@@ -70,15 +68,24 @@ function clip(text: string, limit: number, label: string): string {
 /**
  * 按平台声明的输入上限裁剪简历与 JD。
  *
- * 此前 `maxInputChars` 只是声明，没人读 —— 简历与 JD 原样拼接，长简历
- * （将来支持 PDF 导入后更容易出现）会直接撞上下文上限或报 400。
+ * ⚠ 预算必须扣掉**这次请求真实的固定开销**（system + 用户自定义提示词 + 消息包装），
+ *   而不是一个估出来的常量：
+ *   - 用户自定义提示词是不限长的，写多了就该挤掉简历 / JD 的额度
+ *   - system 文案改动会改变开销，估的常量会静默失准
+ *   - 此前那个 `Math.max(4_000, …)` 还会把小额度**反向抬高**：任何声明 < 6000 的平台
+ *     实际都放行 4000 + 2000 字符，`maxInputChars` 形同虚设
+ *
+ * `overheadChars` 由调用方用 `jsonRequestOverhead()` 算出（那是**实际**拼出来的
+ * 字符数，不是估算）。简历与 JD 都装不下时按比例让给 JD —— 岗位要求是判断主体。
  */
 export function fitInputs(
   provider: AiProvider,
   resumeMarkdown: string,
   jdText: string,
+  overheadChars: number,
 ): { resume: string, jd: string, truncated: boolean } {
-  const budget = Math.max(4_000, provider.capabilities.maxInputChars - PROMPT_RESERVE)
+  const budget = Math.max(0, provider.capabilities.maxInputChars - overheadChars)
+
   const jdLimit = Math.min(jdText.length, Math.floor(budget * JD_BUDGET_RATIO))
   const resume = clip(resumeMarkdown, budget - jdLimit, '简历')
   const jd = clip(jdText, budget - resume.length, 'JD')
@@ -254,21 +261,48 @@ export async function matchJob(
   if (resume.markdown.trim().length === 0)
     throw new Error('简历为空，请先到设置页填写简历')
 
-  const input = fitInputs(provider, resume.markdown, jdText)
+  const system = buildMatchSystem(opts.userPrompt ?? '')
+
+  /*
+   * 先算出「除简历与 JD 之外的一切」占多少字符，再据此裁剪。
+   *
+   * 做法是：用**未裁剪**的载荷拼一次用户消息，再减掉这两块的长度 —— 剩下的就是
+   * system（含用户自定义提示词）、消息包装与 describeJob 的岗位信息，**与实际发出去
+   * 的请求逐字一致**（见 structured.ts 的 jsonRequestOverhead）。
+   */
+  const jobSection = describeJob(job, { withRecruiter: false })
+  const fullUser = [
+    '## 我的简历',
+    resume.markdown,
+    '',
+    '## 目标岗位',
+    jobSection,
+    '',
+    '## 岗位描述（JD）',
+    jdText,
+  ].join('\n')
+
+  const overhead = jsonRequestOverhead(
+    { system, schemaHint: MATCH_SCHEMA_HINT },
+    fullUser.length,
+    resume.markdown.length + jdText.length,
+  )
+
+  const input = fitInputs(provider, resume.markdown, jdText, overhead)
 
   const user = [
     '## 我的简历',
     input.resume,
     '',
     '## 目标岗位',
-    describeJob(job, { withRecruiter: false }),
+    jobSection,
     '',
     '## 岗位描述（JD）',
     input.jd,
-  ].filter(Boolean).join('\n')
+  ].join('\n')
 
   const raw = await requestJson<unknown>(provider, {
-    system: buildMatchSystem(opts.userPrompt ?? ''),
+    system,
     user,
     schemaHint: MATCH_SCHEMA_HINT,
   })
@@ -343,7 +377,32 @@ export async function generateGreeting(
   opts: PromptOptions = {},
 ): Promise<GreetingResult> {
   const provider = makeProvider(settings)
-  const input = fitInputs(provider, resume.markdown, jdText)
+  const system = buildGreetingSystem(opts.userPrompt ?? '')
+
+  // 同 matchJob：先量未裁剪的完整消息，再减掉两块载荷，得到真实开销
+  const jobSection = describeJob(job, { withRecruiter: true })
+  const matchSection = match
+    ? `\n## 匹配分析结论\n${match.summary}\n命中点：${match.reasons.join('；')}`
+    : ''
+  const fullUser = [
+    '## 我的简历',
+    resume.markdown,
+    '',
+    '## 目标岗位',
+    jobSection,
+    '',
+    '## 岗位描述（JD）',
+    jdText,
+    matchSection,
+  ].filter(Boolean).join('\n')
+
+  const overhead = jsonRequestOverhead(
+    { system, schemaHint: GREETING_SCHEMA_HINT },
+    fullUser.length,
+    resume.markdown.length + jdText.length,
+  )
+
+  const input = fitInputs(provider, resume.markdown, jdText, overhead)
 
   const user = [
     '## 我的简历',
@@ -351,15 +410,15 @@ export async function generateGreeting(
     '',
     '## 目标岗位',
     // 招呼语是写给招聘者看的，所以这一路要带上招聘者称呼
-    describeJob(job, { withRecruiter: true }),
+    jobSection,
     '',
     '## 岗位描述（JD）',
     input.jd,
-    match ? `\n## 匹配分析结论\n${match.summary}\n命中点：${match.reasons.join('；')}` : '',
+    matchSection,
   ].filter(Boolean).join('\n')
 
   const raw = await requestJson<unknown>(provider, {
-    system: buildGreetingSystem(opts.userPrompt ?? ''),
+    system,
     user,
     schemaHint: GREETING_SCHEMA_HINT,
   })

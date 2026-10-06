@@ -9,7 +9,7 @@ import {
   normalizeScore,
 } from '../matching'
 import { createAiProvider } from '../platforms'
-import { parseJsonLoose } from '../structured'
+import { buildJsonSystem, jsonRequestOverhead, parseJsonLoose } from '../structured'
 
 /**
  * AI 层单测：容错解析 + 模型返回值的归一化 + 输入裁剪。
@@ -155,7 +155,7 @@ describe('自定义提示词的拼装', () => {
 describe('fitInputs', () => {
   it('不超限时原样返回', () => {
     const provider = createAiProvider('deepseek', { apiKey: 'sk-1' })
-    const out = fitInputs(provider, '简历', 'JD')
+    const out = fitInputs(provider, '简历', 'JD', 0)
 
     expect(out).toEqual({ resume: '简历', jd: 'JD', truncated: false })
   })
@@ -164,13 +164,60 @@ describe('fitInputs', () => {
     const provider = createAiProvider('custom', { apiKey: 'sk-1', baseUrl: 'http://x/v1', model: 'm' })
     const resume = '简'.repeat(40_000)
 
-    const out = fitInputs(provider, resume, 'JD')
+    const out = fitInputs(provider, resume, 'JD', 0)
 
     expect(out.truncated).toBe(true)
     expect(out.resume.length).toBeLessThan(resume.length)
     expect(out.resume).toContain('简历过长')
     // JD 预算独立计算，不该因为简历超长就被吃掉
     expect(out.jd).toBe('JD')
+  })
+
+  /**
+   * 固定开销（system + 用户自定义提示词 + 消息包装）必须真的从预算里扣掉。
+   *
+   * 这条替代了此前那个 `PROMPT_RESERVE = 2000` 的常量估算：估出来的值不会随
+   * 用户提示词变长而变，于是「提示词写得很长」完全不进预算，裁剪后照样超限。
+   */
+  it('固定开销从预算里扣掉，且不会把小额度反向抬高', () => {
+    const provider = createAiProvider('custom', { apiKey: 'sk-1', baseUrl: 'http://x/v1', model: 'm' })
+    const big = '字'.repeat(100_000)
+
+    // 开销更大 → 放行内容更少
+    const small = fitInputs(provider, big, big, 1_000)
+    const large = fitInputs(provider, big, big, 20_000)
+    expect(large.resume.length + large.jd.length)
+      .toBeLessThan(small.resume.length + small.jd.length)
+
+    // 开销已经吃掉整个额度时，一块内容都不该放行（旧实现会硬放 4000 字符）
+    const over = fitInputs(provider, big, big, provider.capabilities.maxInputChars + 1)
+    expect(over.resume).toBe('')
+    expect(over.jd).toBe('')
+    expect(over.truncated).toBe(true)
+  })
+})
+
+describe('jsonRequestOverhead', () => {
+  it('等于最终 system 实长加上消息里的固定字符（不含载荷）', () => {
+    const system = buildGreetingSystem('')
+    const emptyUser = '## 我的简历\n\n\n## 目标岗位\n某岗位\n\n## 岗位描述（JD）\n'
+    /*
+     * 注意量的是 `buildJsonSystem(system)`：requestJson 还会追加那段「输出要求」，
+     * 那部分同样是固定开销，必须在预算里扣掉。
+     */
+    expect(jsonRequestOverhead({ system, schemaHint: 'schema' }, emptyUser.length, 0))
+      .toBe(buildJsonSystem({ system, schemaHint: 'schema' }).length + emptyUser.length)
+  })
+
+  it('用户提示词变长时开销同步变大（这正是旧常量估算漏掉的部分）', () => {
+    const short = jsonRequestOverhead({ system: buildMatchSystem(''), schemaHint: 's' }, 10)
+    const long = jsonRequestOverhead({ system: buildMatchSystem('多'.repeat(500)), schemaHint: 's' }, 10)
+
+    /*
+     * 增量 ≥ 提示词本身：`withUserPrompt` 除了原文还会加一段固定说明（优先级声明），
+     * 所以差额比 500 略大。这里只钉「确实进了预算」，不钉那段文案的字数。
+     */
+    expect(long - short).toBeGreaterThanOrEqual(500)
   })
 })
 

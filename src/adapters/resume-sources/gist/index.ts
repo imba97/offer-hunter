@@ -110,7 +110,10 @@ export default defineResumeSource({
       markdown: content.markdown,
       // 权威标识来自实际取到的文件 —— 自动挑文件时用户并没有指定过它
       contentKey: buildGistContentKey(content.gistId, content.fileName),
+      // 展示文案：这里是文件名，但格式由界面决定，配置回写看下面的 item
       label: content.fileName,
+      // 回写进 itemField 的键：必须是 items 里的某一项
+      item: content.fileName,
       // 文件列表随内容一起回传，界面据此提供「换一个文件」
       items: content.files,
     }

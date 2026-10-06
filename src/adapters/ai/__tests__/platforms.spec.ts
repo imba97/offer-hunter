@@ -40,8 +40,8 @@ describe('自动索引（glob 约定）', () => {
       expect(platform.label.length, platform.id).toBeGreaterThan(0)
       expect(platform.hint.length, platform.id).toBeGreaterThan(0)
       expect(platform.capabilities.maxInputChars, platform.id).toBeGreaterThan(0)
-      expect(['json_schema', 'json_object', 'tool', 'prompt'], platform.id)
-        .toContain(platform.capabilities.structuredOutput)
+      // 能力只有一个布尔：这家平台有没有原生 JSON 输出
+      expect(typeof platform.capabilities.nativeJson, platform.id).toBe('boolean')
     }
   })
 

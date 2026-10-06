@@ -1,5 +1,6 @@
 import type { JobSiteAdapter } from './types'
 import type { SiteId } from '~/logic/types'
+import { collectAdapters } from '../collect'
 import { siteContentEntryOf } from './site-entry'
 
 /**
@@ -25,14 +26,14 @@ import { siteContentEntryOf } from './site-entry'
  *
  * 数组顺序即诊断与提示文案里的展示顺序（按目录路径排序，稳定且可预期）。
  */
-export const JOB_SITES: JobSiteAdapter[] = Object.entries(
+export const JOB_SITES: JobSiteAdapter[] = collectAdapters(
   import.meta.glob<{ default: JobSiteAdapter }>('./**/index.ts', { eager: true }),
+  /*
+   * 平台目录本身不是站点（`sites/feishu/` 没有 index.ts，靠这条约定被排除）。
+   * 将来若平台层也冒出 index.ts，按「有没有 meta」过滤更稳。
+   */
+  { filter: adapter => Boolean(adapter?.meta) },
 )
-  // 平台目录本身不是站点（它没有 index.ts，靠内容脚本约定被排除），
-  // 但将来若平台层也出现了 index.ts，这里按「有没有 meta」过滤更稳
-  .filter(([, mod]) => Boolean(mod.default?.meta))
-  .sort(([a], [b]) => a.localeCompare(b))
-  .map(([, mod]) => mod.default)
 
 /** 按 id 取站点；未知 id 返回 undefined */
 export function getJobSite(id: string): JobSiteAdapter | undefined {

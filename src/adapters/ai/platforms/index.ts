@@ -1,5 +1,6 @@
 import type { AiProvider, ProviderConfig } from '../types'
 import type { AiPlatformDefinition } from './types'
+import { collectAdapters } from '../../collect'
 
 /**
  * AI 平台注册表 + 工厂。
@@ -14,11 +15,9 @@ import type { AiPlatformDefinition } from './types'
 const DEFAULT_MAX_TOKENS = 2048
 
 /** 全部平台声明，按目录路径排序（顺序即设置页下拉框的展示顺序） */
-export const AI_PLATFORMS: AiPlatformDefinition[] = Object.entries(
+export const AI_PLATFORMS: AiPlatformDefinition[] = collectAdapters(
   import.meta.glob<{ default: AiPlatformDefinition }>('./*/index.ts', { eager: true }),
 )
-  .sort(([a], [b]) => a.localeCompare(b))
-  .map(([, mod]) => mod.default)
 
 /** 按 id 取平台声明；未知 id 返回 undefined */
 export function getAiPlatform(id: string): AiPlatformDefinition | undefined {

@@ -67,6 +67,8 @@ function okFetch(markdown = '# 我', fileName = 'resume.md', items = ['resume.md
       markdown,
       contentKey: sourceKey(GIST_ID, fileName),
       label: fileName,
+      // 回写进配置的是 item（能与 items 对上的键），不是展示用的 label
+      item: fileName,
       items,
     },
   }
@@ -280,6 +282,51 @@ describe('子项（换一份内容）', () => {
     await vi.advanceTimersByTimeAsync(DEBOUNCE_MS * 3)
 
     expect(callBackground).toHaveBeenCalledTimes(1)
+  })
+
+  /**
+   * 回写只认 `item`，不认 `label`。
+   *
+   * 这条是这次契约修正的核心：`label` 是给人看的文案，来源可以把它写成
+   * 「简历.md（已自动挑选）」这类带装饰的串；拿它回写配置会把一个不在 items 里的值
+   * 写进去，下拉框于是选不中任何一项（且静默）。
+   */
+  it('label 只是展示文案，不会被回写进配置', async () => {
+    vi.mocked(callBackground).mockResolvedValue({
+      ok: true,
+      content: {
+        markdown: '# 我',
+        contentKey: sourceKey(GIST_ID, 'resume.md'),
+        label: '简历.md（已自动挑选）',
+        item: 'resume.md',
+        items: ['resume.md', 'notes.md'],
+      },
+    })
+
+    const { wrapper } = mountPanel({ gistId: GIST_ID })
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS)
+
+    // 回写的是 item（能与 items 对上的键），不是那句装饰文案
+    expect(lastUpdate(wrapper)).toMatchObject({ fileName: 'resume.md' })
+    expect(wrapper.text()).toContain('简历.md（已自动挑选）')
+  })
+
+  it('来源没给 item 时不回写配置（没有需要收敛的子项）', async () => {
+    vi.mocked(callBackground).mockResolvedValue({
+      ok: true,
+      content: {
+        markdown: '# 我',
+        contentKey: sourceKey(GIST_ID, 'resume.md'),
+        label: 'resume.md',
+        items: ['resume.md'],
+      },
+    })
+
+    const { wrapper } = mountPanel({ gistId: GIST_ID })
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS)
+
+    // 没有 item 就没有配置可写：不该拿 label 顶替
+    expect(wrapper.emitted('update:config')).toBeUndefined()
   })
 
   it('多个子项时出现下拉，换一项会带着新值重新同步', async () => {

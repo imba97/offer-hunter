@@ -13,7 +13,7 @@ export default defineAiPlatform({
   protocol: createOpenAIProtocol(),
   defaultBaseUrl: 'http://localhost:11434/v1',
   defaultModel: '',
-  capabilities: { structuredOutput: 'prompt', maxInputChars: 32_000 },
+  capabilities: { nativeJson: false, maxInputChars: 32_000 },
   thinkingToggle: false,
   label: '自定义端点',
   hint: '中转站 / 自建网关 / 本地模型',
