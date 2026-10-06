@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import browser from 'webextension-polyfill'
-import { currentJob, listenForTabChanges, pageState, refreshCurrentJob, refreshPageState } from '../state'
+import { currentJob, currentSiteTabId, listenForRecordChanges, listenForTabChanges, pageState, records, refreshCurrentJob } from '../state'
 
 /**
  * 标签变化监听的测试。
@@ -28,6 +28,27 @@ vi.mock('webextension-polyfill', () => ({
   },
 }))
 
+/**
+ * 捕获账本变更的订阅者，用来手动投递 `records` 变更事件。
+ *
+ * 真实的 `onStoreChange` 依赖 webext-bridge 的双路广播，这里只需要「订阅回调和
+ * 投递事件」这条缝，所以换成假的（`vi.mock` 会被提升到 import 之前）。
+ */
+const storeWatch = vi.hoisted(() => ({
+  listeners: [] as Array<(kind: 'update' | 'cleared') => void>,
+}))
+
+vi.mock('~/logic/store/events', () => ({
+  onStoreChange: vi.fn((_scope: string, cb: (kind: 'update' | 'cleared') => void) => {
+    storeWatch.listeners.push(cb)
+    return () => {
+      const i = storeWatch.listeners.indexOf(cb)
+      if (i >= 0)
+        storeWatch.listeners.splice(i, 1)
+    }
+  }),
+}))
+
 interface ActivatedInfo {
   tabId: number
   windowId: number
@@ -52,7 +73,7 @@ let siteTabs: Array<{ id: number, url: string }> = []
  *  - `{active:true, currentWindow:true}` → 本窗口活动标签
  *  - `{url: pattern}` → 全局匹配该模式的标签页
  *
- * 这一点很要紧：refreshPageState 会先看活动标签，**再全局回退**去找站点标签页。
+ * 这一点很要紧：currentSiteTabId() 只看活动标签，**不做全局回退**去找站点标签页。
  * 一个只会返回固定值的假实现根本测不出这两条路径的差别。
  */
 function installTabQuery(): void {
@@ -114,10 +135,10 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-describe('刷新页面状态（refreshPageState）', () => {
+describe('刷新页面状态（currentSiteTabId 顺带摆正）', () => {
   it('活动标签就是受支持站点时标记为在站点上', async () => {
     setActiveTab('https://www.zhipin.com/web/geek/jobs')
-    await refreshPageState()
+    await currentSiteTabId()
     expect(pageState.onSupportedSite).toBe(true)
   })
 
@@ -131,7 +152,7 @@ describe('刷新页面状态（refreshPageState）', () => {
     setActiveTab('https://example.com')
     setSiteTabsElsewhere([{ id: 42, url: 'https://www.zhipin.com/web/geek/jobs' }])
 
-    await refreshPageState()
+    await currentSiteTabId()
 
     expect(pageState.onSupportedSite).toBe(false)
   })
@@ -140,7 +161,7 @@ describe('刷新页面状态（refreshPageState）', () => {
     setActiveTab('https://example.com')
     setSiteTabsElsewhere([])
 
-    await refreshPageState()
+    await currentSiteTabId()
 
     expect(pageState.onSupportedSite).toBe(false)
   })
@@ -150,7 +171,7 @@ describe('刷新页面状态（refreshPageState）', () => {
     expect(pageState.checked).toBe(false)
 
     setActiveTab('https://www.zhipin.com/web/geek/jobs')
-    await refreshPageState()
+    await currentSiteTabId()
 
     expect(pageState.checked).toBe(true)
   })
@@ -158,7 +179,7 @@ describe('刷新页面状态（refreshPageState）', () => {
   it('连标签页都查不动时也算查过，界面不会永远停在加载态', async () => {
     tabs.query.mockRejectedValue(new Error('boom'))
 
-    await refreshPageState()
+    await currentSiteTabId()
 
     expect(pageState.checked).toBe(true)
     expect(pageState.onSupportedSite).toBe(false)
@@ -301,5 +322,48 @@ describe('listenForTabChanges', () => {
     expect(onChange).not.toHaveBeenCalled()
     expect(tabs.onActivated.removeListener).toHaveBeenCalled()
     expect(tabs.onUpdated.removeListener).toHaveBeenCalled()
+  })
+})
+
+/**
+ * 账本变更的订阅。
+ *
+ * 此前面板只在挂载时同步一次账本、此后再不订阅，于是设置页点「清空本地数据」之后，
+ * **已经打开的面板仍显示着那些分数与招呼语**（旧数据赖在内存里）。
+ */
+describe('账本变更订阅（listenForRecordChanges）', () => {
+  beforeEach(() => {
+    storeWatch.listeners.length = 0
+    for (const key of Object.keys(records))
+      delete records[key]
+  })
+
+  it('订阅 records 这一个域', () => {
+    const stop = listenForRecordChanges()
+
+    expect(storeWatch.listeners).toHaveLength(1)
+    stop()
+    expect(storeWatch.listeners).toHaveLength(0)
+  })
+
+  it('cleared：直接清掉本地副本（不再多跑一次往返）', () => {
+    records['boss:abc'] = { score: 88 } as never
+
+    listenForRecordChanges()
+    storeWatch.listeners[0]('cleared')
+
+    expect(Object.keys(records)).toHaveLength(0)
+  })
+
+  it('update：重新从后台拉一次账本', async () => {
+    const sendMessage = browser.runtime.sendMessage as unknown as ReturnType<typeof vi.fn>
+    sendMessage.mockResolvedValue({ 'boss:new': { score: 70 } })
+
+    listenForRecordChanges()
+    storeWatch.listeners[0]('update')
+    // syncRecords 内部有 await，等它落地
+    await vi.waitFor(() => expect(Object.keys(records)).toHaveLength(1))
+
+    expect(records['boss:new']).toMatchObject({ score: 70 })
   })
 })

@@ -13,11 +13,11 @@ import {
   currentSiteTabId,
   diagnostic,
   listenForJobChanges,
+  listenForRecordChanges,
   listenForTabChanges,
   pageState,
   records,
   refreshCurrentJob,
-  refreshPageState,
   syncRecords,
 } from './state'
 import Diagnostics from './views/Diagnostics.vue'
@@ -67,6 +67,7 @@ const busy = ref({ matching: false, greeting: false })
 let pollTimer: ReturnType<typeof setInterval> | null = null
 let stopJobPush: (() => void) | null = null
 let stopTabWatch: (() => void) | null = null
+let stopRecordWatch: (() => void) | null = null
 
 /** 首次拿到岗位不算「切换」，避免一打开侧边栏就弹无意义提示 */
 let seenFirstJob = false
@@ -147,8 +148,9 @@ function onJobPushed(job: JobView | null) {
    * ⚠ 这里刻意只校正页面状态，**不**调 refreshCurrentJob：
    *   岗位就是刚推过来的，再回头问一次内容脚本纯属多余，
    *   而且会在推送与拉取之间制造无谓的往返。
+   *   （而这一次校正本身就是 `currentSiteTabId()`：它会顺带把 pageState 摆正。）
    */
-  void refreshPageState()
+  void currentSiteTabId()
   announceSwitch(previousKey)
 }
 
@@ -178,6 +180,13 @@ onMounted(async () => {
   stopTabWatch = listenForTabChanges(() => {
     void poll()
   })
+
+  /*
+   * 账本变更订阅：设置页清空数据、或另一个窗口写了账本时，把面板里的旧数据换掉。
+   * 少了它，面板会一直按 onMounted 那次快照渲染（症状：清空后分数还在）。
+   */
+  stopRecordWatch = listenForRecordChanges()
+
   pollTimer = setInterval(poll, POLL_INTERVAL_MS)
 })
 
@@ -188,6 +197,8 @@ onUnmounted(() => {
   stopJobPush = null
   stopTabWatch?.()
   stopTabWatch = null
+  stopRecordWatch?.()
+  stopRecordWatch = null
 })
 
 /**

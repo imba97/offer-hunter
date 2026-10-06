@@ -2,6 +2,7 @@ import type { DiagnosticResult, JobRecord, JobView } from '~/logic/types'
 import { reactive } from 'vue'
 import { detectSite } from '~/adapters/sites/routing'
 import { callBackground, onPageBroadcast } from '~/logic/messaging'
+import { onStoreChange } from '~/logic/store/events'
 
 /**
  * 侧边栏的共享状态。
@@ -79,26 +80,15 @@ async function findTargetTab(): Promise<{ tabId: number, siteId: string } | null
  * 取「面板该跟着看的那个标签页」的 id；不是受支持站点时返回 null。
  *
  * 给诊断之类需要指定标签页的操作复用，保证与取岗位看的是同一个标签页。
+ *
+ * 顺带把 `pageState` 摆正 —— 判据就是这一次查询的结果，所以调用方不必再单独刷一次
+ * 页面状态（面板打开时那条链路里，`refreshCurrentJob` 与页面状态刷新走的是同一个答案，
+ * 各查一次 `tabs.query` 纯属重复）。
  */
 export async function currentSiteTabId(): Promise<number | null> {
   const target = await findTargetTab()
   pageState.onSupportedSite = target !== null
   return target?.tabId ?? null
-}
-
-/**
- * 刷新「面板该跟着看的标签页是不是受支持站点」。
- *
- * 判据与 refreshCurrentJob 完全同源（都走 findTargetTab），因此不会再出现
- * 「提示语说不在站点上、主体却显示着岗位」这种自相矛盾。
- *
- * 返回值就是刷新后的结果，省得调用方再读一次 pageState（少一次间接，
- * 也避免读到中间态）。
- */
-export async function refreshPageState(): Promise<boolean> {
-  const target = await findTargetTab()
-  pageState.onSupportedSite = target !== null
-  return pageState.onSupportedSite
 }
 
 /**
@@ -237,4 +227,27 @@ export async function syncRecords(): Promise<void> {
   catch (error) {
     console.warn('[offer-hunter] 读取账本失败', error)
   }
+}
+
+/**
+ * 订阅账本变更；返回注销函数。
+ *
+ * ⚠ 不订阅的话，面板只在 `onMounted` 时同步一次账本，此后一直按内存里的旧数据渲染：
+ *   设置页点「清空本地数据」之后，**已经打开的面板仍显示着那些分数与招呼语**；
+ *   在另一个窗口分析了一个岗位，这个窗口也看不到。账本变更的事件早就有了
+ *   （见 `logic/store/events.ts` 的 `onStoreChange`，后台写账本时就会广播），
+ *   此前只是没有生产代码订阅它。
+ *
+ * `cleared` 表示「整个域被清空」：此时要清掉本地副本而不是再拉一次
+ * （拉回来的也是空的，但少一次往返，而且清空是明确的语义）。
+ */
+export function listenForRecordChanges(): () => void {
+  return onStoreChange('records', (kind) => {
+    if (kind === 'cleared') {
+      for (const key of Object.keys(records))
+        delete records[key]
+      return
+    }
+    void syncRecords()
+  })
 }
