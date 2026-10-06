@@ -71,6 +71,9 @@ let stopTabWatch: (() => void) | null = null
 /** 首次拿到岗位不算「切换」，避免一打开侧边栏就弹无意义提示 */
 let seenFirstJob = false
 
+/** 兜底轮询是否有一次还在途（见 poll：失联时避免挂起请求一轮轮叠加） */
+let refreshing = false
+
 /** 岗位的身份标识：优先 securityId，兜底用 JD 文本 */
 function jobKey(job: JobView | null | undefined): string | null {
   if (!job)
@@ -100,11 +103,24 @@ function announceSwitch(previousKey: string | null): void {
  *
  * 主路径是内容脚本的主动推送（listenForJobChanges）。轮询只在推送丢失时
  * （例如内容脚本刚被重载）把状态追回来，因此间隔可以放得很长。
+ *
+ * ⚠ **同一时刻只允许一趟在途**：内容脚本失联时（扩展刚重载、页面正在跳转）
+ *   每次轮询都要等到后台那条转发超时才回来，若允许叠加，挂起的请求会一轮比一轮多。
+ *   在途期间直接跳过这一轮 —— 兜底轮询的意义是「别漏掉变化」，晚一轮无妨。
  */
 async function poll() {
-  const previousKey = jobKey(currentJob.value)
-  await refreshCurrentJob()
-  announceSwitch(previousKey)
+  if (refreshing)
+    return
+
+  refreshing = true
+  try {
+    const previousKey = jobKey(currentJob.value)
+    await refreshCurrentJob()
+    announceSwitch(previousKey)
+  }
+  finally {
+    refreshing = false
+  }
 }
 
 /**

@@ -1,15 +1,12 @@
 import type {
   AiProtocol,
-  ChatRequest,
-  ChatResponse,
-  PingResult,
   ResolvedConfig,
 } from '../types'
 import { requestWithTimeout } from '~/platform/http'
+import { createChatRunner } from './chat'
 import {
   AI_PING_TIMEOUT_MS,
   AI_REQUEST_TIMEOUT_MS,
-  responseErrorDetail,
   stripTrailingSlash,
 } from './http'
 
@@ -103,88 +100,50 @@ export function describeEmptyResponse(raw: unknown): string {
 }
 
 export function createOpenAIProtocol(): AiProtocol {
-  return {
-    name: 'openai',
-
-    async ping(config: ResolvedConfig): Promise<PingResult> {
-      const started = Date.now()
-      const url = `${stripTrailingSlash(config.baseUrl)}/chat/completions`
-      try {
-        const res = await requestWithTimeout(url, {
-          method: 'POST',
+  const { runChat, runPing } = createChatRunner(
+    {
+      build(req, config, ping) {
+        return {
+          url: `${stripTrailingSlash(config.baseUrl)}/chat/completions`,
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${config.apiKey}`,
           },
-          body: JSON.stringify({
-            model: config.model,
-            // 给足预算：思考模式即使关闭，部分平台仍会残留少量推理 token
-            max_tokens: 64,
-            messages: [{ role: 'user', content: '回复 ok' }],
-            ...thinkingParams(config),
-          }),
-        }, AI_PING_TIMEOUT_MS)
-
-        const raw = res.json()
-        const latencyMs = Date.now() - started
-
-        if (!res.ok)
-          return { ok: false, error: responseErrorDetail(raw, res.status), latencyMs }
-
-        const reply = extractOpenAIText(raw).trim()
-        if (!reply) {
-          // 连通性没问题但没正文：给出可诊断的原因，而不是含糊的「空回复」
-          return { ok: false, error: describeEmptyResponse(raw), latencyMs }
+          body: ping
+            ? {
+                model: config.model,
+                // 给足预算：思考模式即使关闭，部分平台仍会残留少量推理 token
+                max_tokens: 64,
+                messages: [{ role: 'user', content: '回复 ok' }],
+                ...thinkingParams(config),
+              }
+            : {
+                model: config.model,
+                max_tokens: config.maxTokens,
+                messages: [
+                  { role: 'system', content: req.system },
+                  ...req.messages.map(m => ({ role: m.role, content: m.content })),
+                ],
+                ...thinkingParams(config),
+                /*
+                 * json_object 只保证合法 JSON，不保证 schema。
+                 * ⚠ DeepSeek 要求 prompt 中出现 "json" 字样，否则可能返回空对象，
+                 * 因此调用方（structured.ts）必须确保 system prompt 含该词。
+                 */
+                ...(req.json ? { response_format: { type: 'json_object' } } : {}),
+              },
         }
-
-        return { ok: true, reply, latencyMs }
-      }
-      catch (error) {
-        return {
-          ok: false,
-          error: error instanceof Error ? error.message : String(error),
-          latencyMs: Date.now() - started,
-        }
-      }
+      },
+      textOf: extractOpenAIText,
+      describeEmpty: describeEmptyResponse,
     },
+    { chat: AI_REQUEST_TIMEOUT_MS, ping: AI_PING_TIMEOUT_MS },
+    requestWithTimeout,
+  )
 
-    async chat(req: ChatRequest, config: ResolvedConfig): Promise<ChatResponse> {
-      const body: Record<string, unknown> = {
-        model: config.model,
-        max_tokens: config.maxTokens,
-        messages: [
-          { role: 'system', content: req.system },
-          ...req.messages.map(m => ({ role: m.role, content: m.content })),
-        ],
-        ...thinkingParams(config),
-      }
-
-      // json_object 只保证合法 JSON，不保证 schema。
-      // ⚠ DeepSeek 要求 prompt 中出现 "json" 字样，否则可能返回空对象，
-      // 因此调用方（structured.ts）必须确保 system prompt 含该词。
-      if (req.json)
-        body.response_format = { type: 'json_object' }
-
-      const res = await requestWithTimeout(`${stripTrailingSlash(config.baseUrl)}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${config.apiKey}`,
-        },
-        body: JSON.stringify(body),
-      }, AI_REQUEST_TIMEOUT_MS)
-
-      // 响应体已在请求内读完（超时覆盖到那一步），这里只解析
-      const raw = res.json()
-
-      if (!res.ok)
-        throw new Error(`[${config.model}] ${responseErrorDetail(raw, res.status)}`)
-
-      const text = extractOpenAIText(raw)
-      if (!text.trim())
-        throw new Error(`[${config.model}] ${describeEmptyResponse(raw)}`)
-
-      return { text, raw }
-    },
+  return {
+    name: 'openai',
+    chat: runChat,
+    ping: runPing,
   }
 }

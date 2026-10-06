@@ -121,6 +121,25 @@ browser.action.onClicked.addListener(async (tab) => {
  * 现在面板先确认自己那个标签页是本站点，再把 tabId 交过来；
  * 两边口径完全一致，不可能再各说各话。
  */
+/**
+ * 转发到内容脚本的超时。
+ *
+ * ⚠ 必须有一个上限，否则「内容脚本失联」会让面板**永久转圈**：扩展重载 / 更新、
+ *   页面正在跳转、标签被 discard 之后，消息不会有任何回复 —— webext-bridge 会把
+ *   未投递的消息留在队列里等重连，而扩展重载后它自己都恢复不了（`runtime.connect`
+ *   直接抛）。此前这里只有 try/catch，没有时间上限，于是 promise 永不 settle，
+ *   面板的 loading 也就永不结束。
+ *
+ * 取 8 秒：正常转发是毫秒级（内容脚本就在同一个浏览器里），8 秒还没回只可能是
+ * 上面那几种失联；再长会让用户以为界面卡死。
+ */
+const RELAY_TIMEOUT_MS = 8_000
+
+/** 页面通信失败的统一文案：超时与抛错都走它，用户只需知道「刷新页面」 */
+function relayFailure(detail: string): string {
+  return `页面通信失败：${detail}（可尝试刷新页面）`
+}
+
 async function relayToContent<T>(
   messageId: string,
   data: unknown,
@@ -129,16 +148,34 @@ async function relayToContent<T>(
   if (typeof tabId !== 'number')
     return { ok: false, reason: '面板没有给出目标标签页' }
 
+  let timer: ReturnType<typeof setTimeout> | null = null
+
   try {
-    const value = await sendMessage(messageId as never, data as never, {
-      context: 'content-script',
-      tabId,
-    }) as T
+    /*
+     * 与超时赛跑。超时那一支自己抛错，于是错误处理只有一条路径
+     *（不像两边各写一份文案那样容易改漏一处）。
+     */
+    const value = await Promise.race([
+      sendMessage(messageId as never, data as never, {
+        context: 'content-script',
+        tabId,
+      }) as Promise<T>,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`等待页面响应超过 ${RELAY_TIMEOUT_MS / 1000} 秒`)),
+          RELAY_TIMEOUT_MS,
+        )
+      }),
+    ])
     return { ok: true, value }
   }
   catch (error) {
-    const detail = errorText(error)
-    return { ok: false, reason: `页面通信失败：${detail}（可尝试刷新页面）` }
+    return { ok: false, reason: relayFailure(errorText(error)) }
+  }
+  finally {
+    // 别让定时器拖住 service worker（它本来就随时可能被回收）
+    if (timer !== null)
+      clearTimeout(timer)
   }
 }
 

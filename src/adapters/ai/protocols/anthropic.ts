@@ -1,15 +1,12 @@
 import type {
   AiProtocol,
-  ChatRequest,
-  ChatResponse,
-  PingResult,
   ResolvedConfig,
 } from '../types'
 import { requestWithTimeout } from '~/platform/http'
+import { createChatRunner } from './chat'
 import {
   AI_PING_TIMEOUT_MS,
   AI_REQUEST_TIMEOUT_MS,
-  responseErrorDetail,
   stripTrailingSlash,
 } from './http'
 
@@ -40,7 +37,12 @@ function thinkingParams(config: ResolvedConfig): Record<string, unknown> {
   return { reasoning: { effort: config.thinking ? 'high' : 'none' } }
 }
 
-/** 从 Anthropic 风格响应里抽出文本内容 */
+/**
+ * 从 Anthropic 风格响应里抽出文本内容。
+ *
+ * ⚠ 只认 `type: 'text'` 的块：thinking 块与 tool_use 块都不是正文，混进来会污染
+ *   JSON 解析（也让「输出被截断」这类诊断失效）。
+ */
 export function extractAnthropicText(raw: unknown): string {
   const data = raw as any
   if (!Array.isArray(data?.content))
@@ -48,6 +50,19 @@ export function extractAnthropicText(raw: unknown): string {
   return data.content
     .map((block: any) => (block?.type === 'text' && typeof block.text === 'string' ? block.text : ''))
     .join('')
+}
+
+/**
+ * 响应没有正文时给可诊断的原因。
+ *
+ * Anthropic 用 `stop_reason` 表达结束原因，其中 `max_tokens` 是最常见的一种：
+ * 思考模式会先把预算烧完，于是 `content` 里一块文本都没有。
+ */
+export function describeAnthropicEmpty(raw: unknown): string {
+  const stop = (raw as any)?.stop_reason ?? '(未知)'
+  if (stop === 'max_tokens')
+    return '输出被 max_tokens 截断：思考模式消耗了全部预算、未产出正文，请调大最大输出 Token 或关闭思考模式'
+  return `模型没有返回正文（stop_reason=${stop}）`
 }
 
 export function createAnthropicProtocol(
@@ -67,80 +82,41 @@ export function createAnthropicProtocol(
     return headers
   }
 
+  const { runChat, runPing } = createChatRunner(
+    {
+      build(req, config, ping) {
+        return {
+          url: `${stripTrailingSlash(config.baseUrl)}/v1/messages`,
+          headers: buildHeaders(config.apiKey),
+          body: ping
+            ? {
+                model: config.model,
+                max_tokens: 64,
+                messages: [{ role: 'user', content: '回复 ok' }],
+                ...thinkingParams(config),
+              }
+            : {
+                model: config.model,
+                max_tokens: config.maxTokens,
+                system: req.system,
+                messages: req.messages
+                  // Anthropic 不接受 system role 出现在 messages 里
+                  .filter(m => m.role !== 'system')
+                  .map(m => ({ role: m.role, content: m.content })),
+                ...thinkingParams(config),
+              },
+        }
+      },
+      textOf: extractAnthropicText,
+      describeEmpty: describeAnthropicEmpty,
+    },
+    { chat: AI_REQUEST_TIMEOUT_MS, ping: AI_PING_TIMEOUT_MS },
+    requestWithTimeout,
+  )
+
   return {
     name: 'anthropic',
-
-    async ping(config: ResolvedConfig): Promise<PingResult> {
-      const started = Date.now()
-      const url = `${stripTrailingSlash(config.baseUrl)}/v1/messages`
-      try {
-        const res = await requestWithTimeout(url, {
-          method: 'POST',
-          headers: buildHeaders(config.apiKey),
-          body: JSON.stringify({
-            model: config.model,
-            max_tokens: 64,
-            messages: [{ role: 'user', content: '回复 ok' }],
-            ...thinkingParams(config),
-          }),
-        }, AI_PING_TIMEOUT_MS)
-
-        const raw = res.json()
-        const latencyMs = Date.now() - started
-
-        if (!res.ok)
-          return { ok: false, error: responseErrorDetail(raw, res.status), latencyMs }
-
-        const reply = extractAnthropicText(raw).trim()
-        if (!reply) {
-          const stop = (raw as any)?.stop_reason ?? '(未知)'
-          return {
-            ok: false,
-            error: stop === 'max_tokens'
-              ? '输出被 max_tokens 截断：思考模式消耗了全部预算、未产出正文，请调大最大输出 Token 或关闭思考模式'
-              : `模型没有返回正文（stop_reason=${stop}）`,
-            latencyMs,
-          }
-        }
-
-        return { ok: true, reply, latencyMs }
-      }
-      catch (error) {
-        return {
-          ok: false,
-          error: error instanceof Error ? error.message : String(error),
-          latencyMs: Date.now() - started,
-        }
-      }
-    },
-
-    async chat(req: ChatRequest, config: ResolvedConfig): Promise<ChatResponse> {
-      const res = await requestWithTimeout(`${stripTrailingSlash(config.baseUrl)}/v1/messages`, {
-        method: 'POST',
-        headers: buildHeaders(config.apiKey),
-        body: JSON.stringify({
-          model: config.model,
-          max_tokens: config.maxTokens,
-          system: req.system,
-          messages: req.messages
-            // Anthropic 不接受 system role 出现在 messages 里
-            .filter(m => m.role !== 'system')
-            .map(m => ({ role: m.role, content: m.content })),
-          ...thinkingParams(config),
-        }),
-      }, AI_REQUEST_TIMEOUT_MS)
-
-      const raw = res.json()
-
-      if (!res.ok)
-        throw new Error(`[${config.model}] ${responseErrorDetail(raw, res.status)}`)
-
-      const text = extractAnthropicText(raw)
-      // 与 OpenAI 协议保持一致：空正文在这里就报错，而不是让上层拿到空字符串
-      if (!text.trim())
-        throw new Error(`[${config.model}] 模型没有返回正文（stop_reason=${(raw as any)?.stop_reason ?? '(未知)'}）`)
-
-      return { text, raw }
-    },
+    chat: runChat,
+    ping: runPing,
   }
 }
