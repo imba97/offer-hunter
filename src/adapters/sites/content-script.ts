@@ -1,8 +1,10 @@
+import type { InjectedEntry } from './injected-protocol'
 import type { JobSiteAdapter } from './types'
 import type { DiagnosticResult } from '~/logic/types'
 import { reactive } from 'vue'
 import { onMessage, sendMessage } from 'webext-bridge/content-script'
 import { jobIdentity, recordKey } from '~/logic/types'
+import { asInjectedMessage, INJECTED_CHANNEL } from './injected-protocol'
 import { isApiSite } from './types'
 
 /**
@@ -23,28 +25,6 @@ import { isApiSite } from './types'
  *    直链打开详情页时响应往往落在那个空档里，所以必须主动要一次快照。
  */
 
-export interface CapturedEntry {
-  url: string
-  ok: boolean
-  keys: string[]
-  error?: string
-}
-
-const INJECTED_CHANNEL = '__offer_hunter__'
-
-interface InjectedMessage {
-  channel: string
-  type: string
-  url?: string
-  ok?: boolean
-  keys?: string[]
-  error?: string
-  data?: unknown
-  entries?: CapturedEntry[]
-  /** 注入脚本缓存下来、还没来得及送出的最近一次详情响应 */
-  lastDetail?: { url: string, data?: unknown } | null
-}
-
 export function createContentScript(site: JobSiteAdapter): () => void {
   /**
    * 有接口的站点（BOSS 这类）才走「捕获响应 + 主动补拉 + 接口探针」那几条路。
@@ -60,7 +40,7 @@ export function createContentScript(site: JobSiteAdapter): () => void {
   })
 
   /** 本会话捕获到的接口记录，用于诊断 */
-  const capturedApis = reactive<CapturedEntry[]>([])
+  const capturedApis = reactive<InjectedEntry[]>([])
 
   /** 上次主动补拉的岗位标识与时间（见 resolveCurrentJob 的冷却逻辑） */
   let lastFetch: { key: string, at: number } | null = null
@@ -84,7 +64,6 @@ export function createContentScript(site: JobSiteAdapter): () => void {
       window.location.origin,
     )
   }
-
   /**
    * 用捕获到的详情响应更新当前岗位。
    *
@@ -115,7 +94,7 @@ export function createContentScript(site: JobSiteAdapter): () => void {
     return true
   }
 
-  function mergeCapturedEntries(entries: CapturedEntry[]): void {
+  function mergeCapturedEntries(entries: InjectedEntry[]): void {
     for (const entry of entries) {
       const idx = capturedApis.findIndex(a => a.url === entry.url)
       if (idx === -1)
@@ -139,8 +118,9 @@ export function createContentScript(site: JobSiteAdapter): () => void {
       if (ev.source !== window)
         return
 
-      const msg = ev.data as InjectedMessage
-      if (!msg || msg.channel !== INJECTED_CHANNEL)
+      // 通道与形状由 injected-protocol.ts 统一窄化（页面上别的脚本也在 postMessage）
+      const msg = asInjectedMessage(ev.data)
+      if (!msg)
         return
 
       if (msg.type === 'ready') {
@@ -155,8 +135,7 @@ export function createContentScript(site: JobSiteAdapter): () => void {
        * document_idle 之前就回来了，被动监听根本来不及挂上。
        */
       if (msg.type === 'captured-snapshot') {
-        if (Array.isArray(msg.entries))
-          mergeCapturedEntries(msg.entries)
+        mergeCapturedEntries(msg.entries)
 
         const data = msg.lastDetail?.data
         if (data && !currentJob.value) {
@@ -170,13 +149,13 @@ export function createContentScript(site: JobSiteAdapter): () => void {
         return
       }
 
-      if (msg.type !== 'api' || !msg.url)
+      if (msg.type !== 'api')
         return
 
-      const entry: CapturedEntry = {
+      const entry: InjectedEntry = {
         url: msg.url,
-        ok: Boolean(msg.ok),
-        keys: msg.keys ?? [],
+        ok: msg.ok,
+        keys: msg.keys,
         error: msg.error,
       }
       mergeCapturedEntries([entry])

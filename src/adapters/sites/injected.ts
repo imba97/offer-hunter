@@ -13,17 +13,14 @@
  * ⚠ 所有 hook 必须容错：注入脚本一旦抛错就会破坏宿主页面的正常功能。
  */
 
+import type {
+  CapturedApi,
+  InjectedToContentPayload,
+} from './injected-protocol'
+import { asInjectedMessage, INJECTED_CHANNEL } from './injected-protocol'
+
 /* eslint-disable no-console */
 
-export interface CapturedApi {
-  url: string
-  ok: boolean
-  keys: string[]
-  error?: string
-  ts: number
-}
-
-const CHANNEL = '__offer_hunter__'
 /** 只保留最近若干条，避免长会话内存膨胀 */
 const MAX_CAPTURED = 50
 
@@ -50,9 +47,16 @@ export function installInjectedCapture(options: InjectedOptions): void {
    */
   let lastDetail: { url: string, data: unknown } | null = null
 
-  function post(payload: Record<string, unknown>): void {
+  /**
+   * 发一条协议消息。
+   *
+   * 参数是「协议消息去掉 channel」的形状（channel 由这里统一补上），因此每条消息
+   * 的字段都由 `injected-protocol.ts` 约束着 —— 写错字段名编译期就报错，
+   * 不会再出现「两侧人肉对齐、错了静默失效」。
+   */
+  function post(payload: InjectedToContentPayload): void {
     try {
-      window.postMessage({ channel: CHANNEL, ...payload }, window.location.origin)
+      window.postMessage({ channel: INJECTED_CHANNEL, ...payload }, window.location.origin)
     }
     catch {
       // 忽略：postMessage 失败不应影响宿主页面
@@ -221,24 +225,24 @@ export function installInjectedCapture(options: InjectedOptions): void {
   window.addEventListener('message', (ev: MessageEvent) => {
     if (ev.source !== window)
       return
-    const msg = ev.data
-    if (!msg || msg.channel !== CHANNEL)
+
+    const msg = asInjectedMessage(ev.data)
+    if (msg?.type !== 'get-captured')
       return
 
-    if (msg.type === 'get-captured') {
-      post({
-        type: 'captured-snapshot',
-        requestId: msg.requestId,
-        entries: captured.map(c => ({
-          url: c.url,
-          ok: c.ok,
-          keys: c.keys,
-          error: c.error,
-        })),
-        // 连同最近一次详情响应一起给出去：隔离世界正是靠它补上装载前的空档
-        lastDetail,
-      })
+    const snapshot: Extract<InjectedToContentPayload, { type: 'captured-snapshot' }> = {
+      type: 'captured-snapshot',
+      requestId: msg.requestId,
+      entries: captured.map(c => ({
+        url: c.url,
+        ok: c.ok,
+        keys: c.keys,
+        error: c.error,
+      })),
+      // 连同最近一次详情响应一起给出去：隔离世界正是靠它补上装载前的空档
+      lastDetail,
     }
+    post(snapshot)
   })
 
   post({ type: 'ready' })
