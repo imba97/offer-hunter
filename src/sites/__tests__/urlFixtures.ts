@@ -40,11 +40,22 @@ export const V2EX_PAGE_URLS = [
   'https://global.v2ex.co/t/1245478',
 ]
 
+export const MEDIASTORM_PAGE_URLS = [
+  // 职位列表页（「打开职位页」按钮的目标）
+  'https://mediastorm.jobs.feishu.cn/index/position',
+  // 岗位详情页：真正读岗位的地方（用户直接打开 / 分享链接的形态）
+  'https://mediastorm.jobs.feishu.cn/index/position/7673106028406786331/detail',
+  // 站内路由跳转的形态（同一个岗位，另一种路径）
+  'https://mediastorm.jobs.feishu.cn/position/detail/7673106028406786331',
+  'http://mediastorm.jobs.feishu.cn/index/position/7673106028406786331/detail',
+]
+
 /** 站点 id → 属于它的地址。加站点时这里也要加一组，否则「认不认得出」没有测试。 */
 export const SITE_PAGE_URLS: Record<string, string[]> = {
   boss: BOSS_PAGE_URLS,
   eleduck: ELEDUCK_PAGE_URLS,
   v2ex: V2EX_PAGE_URLS,
+  mediastorm: MEDIASTORM_PAGE_URLS,
 }
 
 export const NON_SITE_URLS = [
@@ -56,6 +67,13 @@ export const NON_SITE_URLS = [
   // 同理：v2ex.com / v2ex.co 之外的都是别的站点
   'https://v2ex.com.evil.com/t/1245478',
   'https://v2ex.co.evil.com/t/1245478',
+  /*
+   * 同理：飞书招聘上只认租户表里列出的那些子域。
+   * 这两条是**有意**不认的 —— 放行它们等于申请一个能读该平台上所有公司招聘页的
+   * 主机权限（见 sites/feishu/tenants.ts 文件头）。
+   */
+  'https://mediastorm.jobs.feishu.cn.evil.com/index/position/1/detail',
+  'https://other.jobs.feishu.cn/index/position/7673106028406786331/detail',
   'https://www.liepin.com/',
   'https://www.51job.com/',
   // 浏览器内部页 / 扩展页

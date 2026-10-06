@@ -26,21 +26,48 @@ type Target = 'content' | 'injected'
 
 const SITES_DIR = r('src/sites')
 
-/** 与 sites/registry.ts 同一套约定：目录 + 该目标对应的入口文件 */
-function discoverSites(target: Target): string[] {
+/**
+ * 站点 id → 入口文件绝对路径（该目标对应的那个入口）。
+ *
+ * ⚠ 站点**可以嵌在平台目录下**（`sites/feishu/mediastorm/content.ts`）：
+ *   飞书招聘这类「一套前端 + 一套接口 + 多家公司子域」的平台，平台共用逻辑放在
+ *   `sites/<平台>/`，每家公司是它下面的一个子目录。因此这里**按叶子目录名取站点
+ *   id**（`mediastorm`），并递归一层去找入口 —— 站点 id 仍然等于它自己那个目录名，
+ *   「id 与目录名一致」这条约定没有被破坏（见 src/sites/types.ts 与
+ *   src/sites/__tests__/registry.spec.ts）。
+ *
+ * 之所以只递归一层而不是任意深度：`sites/<平台>/<站点>/` 已经够表达「平台 + 租户」，
+ * 再深就该重新想抽象了 —— 而那种结构下「站点 id 取自哪个目录」会变得含糊。
+ */
+function discoverSites(target: Target): Map<string, string> {
   const entryName = target === 'content' ? 'content.ts' : 'injected.ts'
+  const found = new Map<string, string>()
 
-  const ids = readdirSync(SITES_DIR, { withFileTypes: true })
-    .filter(entry => entry.isDirectory())
-    // 排除 __tests__ 之类的非站点目录，避免把它们也当成站点
-    .filter(entry => !entry.name.startsWith('_') && !entry.name.startsWith('.'))
-    .map(entry => entry.name)
-    .filter(id => existsSync(resolve(SITES_DIR, id, entryName)))
+  const collect = (dir: string, id: string): void => {
+    const entry = resolve(dir, entryName)
+    if (existsSync(entry)) {
+      found.set(id, entry)
+      return
+    }
 
-  if (ids.length === 0)
+    for (const child of readdirSync(dir, { withFileTypes: true })) {
+      // 排除 __tests__ 之类的非站点目录，避免把它们也当成站点
+      if (!child.isDirectory() || child.name.startsWith('_') || child.name.startsWith('.'))
+        continue
+      collect(resolve(dir, child.name), child.name)
+    }
+  }
+
+  for (const child of readdirSync(SITES_DIR, { withFileTypes: true })) {
+    if (!child.isDirectory() || child.name.startsWith('_') || child.name.startsWith('.'))
+      continue
+    collect(resolve(SITES_DIR, child.name), child.name)
+  }
+
+  if (found.size === 0)
     throw new Error(`src/sites/ 下没有找到任何含 ${entryName} 的站点目录`)
 
-  return ids
+  return found
 }
 
 async function main(): Promise<void> {
@@ -59,7 +86,7 @@ async function main(): Promise<void> {
   const configFile = target === 'content' ? 'vite.config.content.mts' : 'vite.config.injected.mts'
   const sites = discoverSites(target)
 
-  log('BUILD', `${target}：${sites.join(', ')}${watch ? '（watch）' : ''}`)
+  log('BUILD', `${target}：${[...sites.keys()].join(', ')}${watch ? '（watch）' : ''}`)
 
   /*
    * ⚠ 站点必须经 **process.env** 传给配置文件，不能用 build({ env })：
@@ -77,8 +104,14 @@ async function main(): Promise<void> {
    * watch 模式下每个站点自己的 watcher 会活到进程结束：`build()` 在首个构建
    * 完成后 resolve（返回 watcher），所以循环能继续走到下一个站点。
    */
-  for (const site of sites) {
+  for (const [site, entry] of sites) {
+    /*
+     * ⚠ 站点 id 经**环境变量**传给配置，入口路径经另一个变量传：
+     *   站点可以嵌在平台目录下（sites/feishu/mediastorm/），配置里无法靠
+     *   `sites/<id>/content.ts` 拼出入口，而它又必须知道产物该叫什么名字。
+     */
     process.env.OFFER_HUNTER_SITE = site
+    process.env.OFFER_HUNTER_SITE_ENTRY = entry
     await build({
       configFile: r(configFile),
       mode: isDev ? 'development' : 'production',
@@ -92,6 +125,7 @@ async function main(): Promise<void> {
   }
 
   delete process.env.OFFER_HUNTER_SITE
+  delete process.env.OFFER_HUNTER_SITE_ENTRY
 }
 
 main().catch((error) => {

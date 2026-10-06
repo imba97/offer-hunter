@@ -8,27 +8,26 @@ import { sharedConfig } from './vite.config.mjs'
 /**
  * MAIN world 注入脚本打包 —— **每次只打一个站点**。
  *
- * 站点由环境变量 `OFFER_HUNTER_SITE` 指定；scripts/build-sites.ts 会为每个站点
- * 各跑一次本配置（与 vite.config.content.mts 同一套做法，理由见那个文件：
- * Vite 8 不支持多入口 + iife）。
+ * 站点与入口由环境变量给出（`OFFER_HUNTER_SITE` / `OFFER_HUNTER_SITE_ENTRY`）；
+ * scripts/build-sites.ts 会为每个站点各跑一次本配置（与 vite.config.content.mts
+ * 同一套做法，理由见那个文件：Vite 8 不支持多入口 + iife）。
  *
  * 必须打成**自包含 IIFE**：manifest 里 world:MAIN 的注入只接受普通脚本，
  * 不支持 ESM import，所以每个站点的产物必须把所有依赖内联进来。
  * 这也是它不能和内容脚本共用同一个 bundle 的原因。
  */
-const SITES_DIR = r('src/sites')
-
 const targetSite = process.env.OFFER_HUNTER_SITE ?? ''
+const targetEntry = process.env.OFFER_HUNTER_SITE_ENTRY ?? ''
 
-if (!targetSite) {
+if (!targetSite || !targetEntry) {
   throw new Error(
-    '缺少 OFFER_HUNTER_SITE：注入脚本必须按站点逐个构建，请用 `pnpm build:injected`（见 scripts/build-sites.ts）',
+    '缺少 OFFER_HUNTER_SITE / OFFER_HUNTER_SITE_ENTRY：注入脚本必须按站点逐个构建，请用 `pnpm build:injected`（见 scripts/build-sites.ts）',
   )
 }
 
-const entry = resolve(SITES_DIR, targetSite, 'injected.ts')
+const entry = resolve(targetEntry)
 if (!existsSync(entry)) {
-  throw new Error(`站点 ${targetSite} 没有 injected.ts：${entry}`)
+  throw new Error(`站点 ${targetSite} 的注入脚本入口不存在：${entry}`)
 }
 
 export default defineConfig({

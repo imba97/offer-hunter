@@ -74,11 +74,12 @@ Base URL, model and max output tokens are overridable on every preset, and there
 
 ## Supported job sites
 
-| Site | How it is read | Notes |
-| --- | --- | --- |
-| [BOSS Zhipin](https://www.zhipin.com/web/geek/jobs) | The site's own API | Captures the job detail responses passively; the richest data (salary, company, recruiter) |
-| [eleduck](https://eleduck.com/jobs-channel) | Page DOM only | Reads the title and body of a job post; no structured fields, so company and salary stay empty |
-| [V2EX 酷工作](https://www.v2ex.com/go/jobs) | Page DOM only | Only posts filed under the 酷工作 (`/go/jobs`) node count; reads the title and body, so company and salary stay empty |
+| Site | How it is read |
+| --- | --- |
+| [BOSS Zhipin](https://www.zhipin.com/web/geek/jobs) | The site's own API |
+| [eleduck](https://eleduck.com/jobs-channel) | Page DOM only |
+| [V2EX 酷工作](https://www.v2ex.com/go/jobs) | Page DOM only |
+| [影视飓风 (MediaStorm)](https://mediastorm.jobs.feishu.cn/index/position) | The site's own API (Feishu ATS) |
 
 The side panel's Jobs tab lists one "open jobs page" button per platform, in that platform's brand colour; open any posting from there and it becomes the job under analysis.
 
@@ -122,56 +123,23 @@ fetch) by `components/ResumeSourcePanel.vue` — **an ordinary source needs no U
 code at all**. The sync orchestration (debounce, a 10-minute throttle, the status
 machine) is shared in `useResumeSourceSync.ts`.
 
-**Job sites** — `src/sites/`: the adapter contract (`types.ts`, including
-`source: 'api' | 'dom'`), the pure-data descriptors the background and build
-scripts read (`site-descriptors.ts`), data-driven routing (`routing.ts`), the full
-adapter list (`registry.ts`), and one directory per site holding all of that
-site's private logic (selectors, API calls, response translation, cleaning),
-including one that reads page DOM only. A new site is that directory plus a
-descriptor entry plus a registry line. **The manifest's host permissions and
-content scripts, and the build output paths, are all derived automatically** —
-tab routing, the side panel's per-platform buttons and colours, and the AI
-prompts need no changes either.
+**Job sites** — `src/sites/`:
 
-Two boundaries exist because we hit them:
+```text
+types.ts             the adapter contract (including source: 'api' | 'dom')
+site-descriptors.ts  pure data (id / label / jobs page / colours / matches) — read by the background and build scripts
+routing.ts           data-driven routing (which site a tab belongs to, prompt copy)
+registry.ts          the full adapter list
+boss/ eleduck/ v2ex/ one directory per site, holding that site's private logic
+feishu/              Feishu ATS (a multi-tenant platform): shared platform logic + tenant table + one entry directory per tenant
+```
 
-- **The background imports `routing.ts`/`site-descriptors.ts`, never `registry.ts`.**
-  Otherwise every site's selectors and DOM code get pulled into the service worker
-  bundle (`querySelector` really did show up in the background output).
-- **`SiteId` is an open string, not a literal union.** A closed union forces you to
-  edit the domain model just to add a site — the coupling this refactor removed.
-  Tests cover it instead (ids unique, ids match directory names).
-
-Two conventions come straight from real sites:
-
-- **`source: 'api' | 'dom'` is the single discriminator for how a site is read.**
-  The manifest only injects the MAIN-world script for `'api'` sites (a DOM-only site
-  has no API responses to capture, so the hook would be pure intrusion), and the
-  content script only runs the API probe and active refetch for them. Because it is
-  a discriminated union, declaring `'api'` without implementing the response
-  translation does not compile.
-- **Everything on `JobCore` except `title` is optional.** Salary, degree, funding
-  stage and friends only exist on structured APIs like BOSS's; a DOM-only source
-  (eleduck, V2EX) naturally yields just a title and a body, and inventing the rest
-  would invent wrong data.
-
-Site information lives outside `JobCore` (in `JobView.site`), so `matching.ts`,
-`Sidepanel.vue` and `JobDetailCard.vue` depend only on the site-agnostic
-`JobCore` — none of them change when a site is added. The "open the jobs page"
-buttons are rendered from the descriptors, colours included.
-
-V2EX brings a question the other sites do not have: **it is a general forum, so a
-post is not automatically a job posting.** The "is this page a job?" judgement
-therefore lives in the adapter's `readJd` / `readOutline` (it keys off the `/go/jobs`
-link in the node breadcrumb, see `sites/v2ex/selectors.ts`), and posts filed under
-any other node return `null` — the content script then produces no job at all.
-
-That judgement deliberately stays **out** of the container selectors
-(`jdProbeElement` / `jdContainerElement`): they only answer "is the container
-there", which is what the observer needs to attach at all. Put the judgement there
-and a non-job post leaves the observer retrying its mount every 500ms (see
-`sites/types.ts`). Both read functions apply the same predicate independently
-rather than pushing it down into the container layer.
+A new site is that directory plus a descriptor entry plus a registry line; **the
+manifest's host permissions, content scripts and build output paths are all derived
+automatically**, so tab routing, the side panel buttons and the AI prompts need no
+changes. Platform sites (Feishu ATS) add one level: shared logic in `sites/feishu/`,
+one subdirectory per employer (`sites/feishu/mediastorm/`), and the site id is the
+leaf directory name.
 
 The job ledger is keyed by `siteId:naturalKey` (see `recordKey` in
 `logic/types.ts`); data from the single-site era is migrated on startup.

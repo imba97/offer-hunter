@@ -94,11 +94,12 @@ pnpm build
 
 ## 支持的招聘网站
 
-| 站点 | 取数方式 | 说明 |
-| --- | --- | --- |
-| [BOSS 直聘](https://www.zhipin.com/web/geek/jobs) | 页面接口 | 被动捕获 `/wapi/` 的岗位详情，信息最全（薪资、公司、招聘者） |
-| [电鸭社区](https://eleduck.com/jobs-channel) | 只读页面 DOM | 从招聘帖读标题与正文；没有结构化字段，公司/薪资留空 |
-| [V2EX 酷工作](https://www.v2ex.com/go/jobs) | 只读页面 DOM | 只认发在「酷工作」节点（`/go/jobs`）的帖子，读标题与正文；公司/薪资留空 |
+| 站点 | 取数方式 |
+| --- | --- |
+| [BOSS 直聘](https://www.zhipin.com/web/geek/jobs) | 页面接口 |
+| [电鸭社区](https://eleduck.com/jobs-channel) | 只读页面 DOM |
+| [V2EX 酷工作](https://www.v2ex.com/go/jobs) | 只读页面 DOM |
+| [影视飓风](https://mediastorm.jobs.feishu.cn/index/position) | 页面接口（飞书招聘 ATS） |
 
 侧边栏的「岗位」页会按平台列出各自的职位页入口（按钮用平台主色），点开后任意打开一个岗位/帖子即可分析。
 
@@ -133,48 +134,16 @@ types.ts             适配器契约（含 source: 'api' | 'dom' 两种取数方
 site-descriptors.ts  纯数据（id / 名字 / 职位页 / 配色 / 匹配域名 / 取数方式）—— 后台与构建脚本读它
 routing.ts           数据驱动的路由（认站点、匹配模式、提示文案）
 registry.ts          完整适配器清单
-boss/                某个站点的全部站点私有逻辑（选择器、接口、响应翻译、清洗）
-eleduck/             同上，但取数方式是「只读页面 DOM」
-v2ex/                同上，且多一条「帖子算什么岗位」的节点判据（见下）
+boss/ eleduck/ v2ex/ 一个站点一个目录，放该站点的全部私有逻辑
+feishu/              飞书招聘（多租户平台）：平台共用逻辑 + 租户表 + 各租户入口目录
 ```
 
-新增站点 = 加一个 `sites/<id>/` 目录（`index.ts` 适配器 + `content.ts` 入口；
+新增站点 = 加一个 `sites/<id>/` 目录（`index.ts` 适配器 + `content.ts` 入口，
 **有接口的站点再加一个 `injected.ts`**）+ 在描述表加一项 + 在注册表加一行。
 **manifest 的主机权限与 content_scripts、构建的产物路径全部自动派生**，
 后台的标签页路由、侧边栏的平台按钮与配色、AI 提示词也都不需要改。
-
-两条刻意的边界，都是踩过才定下来的：
-
-- **后台只 import `routing.ts`/`site-descriptors.ts`，绝不 import `registry.ts`。**
-  否则每个站点的选择器与 DOM 代码会被拖进 service worker 包（实测 `querySelector`
-  真的会出现在后台产物里）。`descriptors.ts` 里说明了两者的分工。
-- **`SiteId` 是开放字符串，不是字面量联合。** 闭合联合会逼着「加一个站点还要改领域模型」，
-  正是这次重构要消掉的耦合；改由测试兜底（id 唯一、与目录名一致）。
-
-两条取自真机的约定：
-
-- **`source: 'api' | 'dom'` 是取数方式的唯一判别。** manifest 只给 `'api'` 的站点注入
-  MAIN world 脚本（DOM-only 站点没有接口要捕获，挂 hook 是纯侵入），内容脚本也只在
-  `'api'` 站点跑接口探针与主动补拉。这是联合类型，因此「声明了 `'api'` 却忘了实现接口
-  翻译」在编译期就过不去。
-- **`JobCore` 里除 `title` 外全部可选，面板必须容忍缺失。** 薪资、学历、融资阶段这些是
-  BOSS 那类结构化接口才有的字段；只读 DOM 的来源（电鸭社区、V2EX）天然只给得出标题与正文，
-  硬凑只会凑出错误信息。
-
-站点信息藏在 `JobCore` 之外（`JobView.site`），所以 `matching.ts`、`Sidepanel.vue`、
-`JobDetailCard.vue` 只依赖站点无关的 `JobCore` —— 加站点时它们一行都不用改。
-「打开职位页」的按钮也由站点描述循环渲染，配色是描述里的一项（`color` / `textColor`）。
-
-V2EX 多出一个别家没有的问题：**它是一个综合论坛，帖子本身不等于岗位。** 因此
-「这一页算不算岗位」的判断落在适配器的 `readJd` / `readOutline` 里（判据是节点
-头部那条 `/go/jobs` 链接，见 `sites/v2ex/selectors.ts`），不是发在「酷工作」节点
-的帖子一律返回 null —— 内容脚本于是不会为它产生任何岗位。
-
-这条判断刻意**不**写进容器选择器（`jdProbeElement` / `jdContainerElement`）：它们
-只回答「容器在不在」，观察器要靠这个稳定容器才挂得上；判定一旦写进去，非工作帖
-会让观察器陷入 500ms 的挂载重试循环（见 `sites/types.ts` 的说明）。两个判定点
-（`readJd` 与 `readOutline`）都各自走一次同一个判据，宁可多查一次选择器，也不把
-它下移到容器层。
+平台类站点（飞书招聘）多一层：平台共用逻辑在 `sites/feishu/`，
+每家公司是它下面的一个子目录（`sites/feishu/mediastorm/`），站点 id 取叶子目录名。
 
 岗位账本以 `siteId:naturalKey` 为键（见 `logic/types.ts` 的 `recordKey`），
 旧数据（键只是 BOSS 的 securityId）在启动时迁移一次，不会丢。

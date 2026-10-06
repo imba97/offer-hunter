@@ -1,4 +1,4 @@
-import { existsSync, readdirSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import process from 'node:process'
 import { defineConfig } from 'vite'
@@ -8,8 +8,8 @@ import { sharedConfig } from './vite.config.mjs'
 /**
  * 内容脚本（ISOLATED world）打包 —— **每次只打一个站点**。
  *
- * 站点由环境变量 `OFFER_HUNTER_SITE` 指定；scripts/build-sites.ts 会为每个站点
- * 各跑一次本配置。为什么要这样绕：
+ * 站点与入口由环境变量给出（`OFFER_HUNTER_SITE` / `OFFER_HUNTER_SITE_ENTRY`）；
+ * scripts/build-sites.ts 会为每个站点各跑一次本配置。为什么要这样绕：
  *
  *   manifest 的 `js` 数组是按普通脚本注入的，所以产物必须是 **IIFE**，
  *   而 Vite 8 明确不支持「多个入口 + iife/umd」（报 "Multiple entry points are
@@ -20,35 +20,26 @@ import { sharedConfig } from './vite.config.mjs'
  * 逐站点打包反而更贴合需求：各站点的选择器不会互相污染，新增站点也不改变
  * 既有站点的产物（避免「加一家、坏一家」）。
  *
- * ⚠ 站点清单用**目录约定**发现（src/sites/<id>/ 下有 content.ts 就算一个站点），
- *   而不是 import sites/registry —— 那个注册表用了 `~/` 别名，而 Vite 读配置
- *   文件时走自己的打包路径，解析不了别名（实测 ERR_MODULE_NOT_FOUND）。
- *   约定与注册表一致：加一个站点目录 + 在注册表加一行。
+ * ⚠ 入口路径由构建脚本给出，不在这里按目录拼：站点**可以嵌在平台目录下**
+ *   （sites/feishu/mediastorm/content.ts），而站点 id 仍然只是叶子目录名
+ *   （见 scripts/build-sites.ts 的 discoverSites）。
+ *
+ * ⚠ 站点清单用**目录约定**发现，而不是 import sites/registry —— 那个注册表用了
+ *   `~/` 别名，而 Vite 读配置文件时走自己的打包路径，解析不了别名
+ *   （实测 ERR_MODULE_NOT_FOUND）。约定与注册表一致：加一个站点目录 + 注册一行。
  */
-const SITES_DIR = r('src/sites')
-
-/** 构建脚本通过它告诉本配置这次打哪个站点 */
 const targetSite = process.env.OFFER_HUNTER_SITE ?? ''
+const targetEntry = process.env.OFFER_HUNTER_SITE_ENTRY ?? ''
 
-if (!targetSite) {
+if (!targetSite || !targetEntry) {
   throw new Error(
-    '缺少 OFFER_HUNTER_SITE：内容脚本必须按站点逐个构建，请用 `pnpm build:js`（见 scripts/build-sites.ts）',
+    '缺少 OFFER_HUNTER_SITE / OFFER_HUNTER_SITE_ENTRY：内容脚本必须按站点逐个构建，请用 `pnpm build:js`（见 scripts/build-sites.ts）',
   )
 }
 
-const entry = resolve(SITES_DIR, targetSite, 'content.ts')
+const entry = resolve(targetEntry)
 if (!existsSync(entry)) {
-  throw new Error(`站点 ${targetSite} 没有 content.ts：${entry}`)
-}
-
-/** 供构建脚本与其他工具复用：列出所有站点（目录约定） */
-export function discoverSiteIds(dir = SITES_DIR): string[] {
-  return readdirSync(dir, { withFileTypes: true })
-    .filter(entry => entry.isDirectory())
-    // 排除 __tests__ 之类的非站点目录，避免把它们也当成站点去打包
-    .filter(entry => !entry.name.startsWith('_') && !entry.name.startsWith('.'))
-    .map(entry => entry.name)
-    .filter(id => existsSync(resolve(dir, id, 'content.ts')))
+  throw new Error(`站点 ${targetSite} 的内容脚本入口不存在：${entry}`)
 }
 
 export default defineConfig({

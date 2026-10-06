@@ -1,4 +1,6 @@
 import type { SiteDescriptor } from './descriptors'
+import type { FeishuAtsTenant } from './feishu/tenants'
+import { FEISHU_ATS_TENANTS, getFeishuAtsTenant, tenantHostname, tenantJobsPageUrl } from './feishu/tenants'
 
 /**
  * 各站点的纯数据描述。**新增站点 = 加一个 sites/<id>/ 目录 + 在这里加一项。**
@@ -8,6 +10,11 @@ import type { SiteDescriptor } from './descriptors'
  * ⚠ 每个站点的 `id` 必须与 `src/sites/<id>/` 目录名一致：构建配置按目录约定
  *   生成产物路径（dist/injected/<id>.js、dist/contentScripts/<id>.global.js），
  *   两者对不上会表现成「构建成功但脚本没注入」。
+ *
+ * ⚠ 一处例外：**飞书招聘的租户**（见底下 `FEISHU_ATS_TENANTS`）由租户表派生。
+ *   它们的适配器实例在 `feishu/site.ts` 里按同一张表生成，入口目录是
+ *   `sites/feishu/<公司>/`（构建按目录约定发现入口），所以「加一行 + 建一个目录」
+ *   这个契约没有被绕过，只是描述与适配器都不用再手写一遍。
  */
 
 /*
@@ -41,6 +48,32 @@ export const V2EX_HOSTNAMES = ['v2ex.com', 'v2ex.co']
  * （/t/<id>），且只认发在这个节点下的帖子。
  */
 export const V2EX_JOBS_PAGE_URL = 'https://www.v2ex.com/go/jobs'
+
+/*
+ * 影视飓风是**飞书招聘（ATS）**上的一个租户：它的招聘页跑在该平台上，主机名因此是
+ * 租户子域而不是自家域名。刻意只认这一个子域，不放行整个 `*.jobs.feishu.cn` ——
+ * 那等于申请一个能读该平台上所有公司招聘页的主机权限
+ * （理由见 sites/feishu/tenants.ts 的文件头）。
+ *
+ * ⚠ 下面这几个常量是**从租户表推导**的，不是另写一份字面量：租户表是这几项的
+ *   唯一来源，否则「改了租户表忘了描述表」就会出现「后台认这个域名、租户表说另一个」
+ *   这种自相矛盾的状态（而两侧各自看起来都对）。
+ */
+const MEDIASTORM_TENANT = getFeishuAtsTenant('mediastorm')
+
+if (!MEDIASTORM_TENANT) {
+  // 编码错误（租户表里删了它却忘了改这里），当场炸掉比静默生成一堆 undefined 好
+  throw new Error('租户表里没有 mediastorm：site-descriptors.ts 与 feishu/tenants.ts 不一致')
+}
+
+export const MEDIASTORM_SITE_ID = MEDIASTORM_TENANT.id
+export const MEDIASTORM_MATCHES = [`*://${tenantHostname(MEDIASTORM_TENANT)}/*`]
+export const MEDIASTORM_HOSTNAMES = [tenantHostname(MEDIASTORM_TENANT)]
+/*
+ * 社招官网的职位列表页。与电鸭 / V2EX 一样，这里只是**列表**地址：
+ * 拿岗位内容要到具体的详情页（`/index/position/<id>/detail`）。
+ */
+export const MEDIASTORM_JOBS_PAGE_URL = tenantJobsPageUrl(MEDIASTORM_TENANT)
 
 export const SITE_DESCRIPTORS: SiteDescriptor[] = [
   {
@@ -82,4 +115,43 @@ export const SITE_DESCRIPTORS: SiteDescriptor[] = [
     matches: V2EX_MATCHES,
     hostnames: V2EX_HOSTNAMES,
   },
+  {
+    id: MEDIASTORM_SITE_ID,
+    label: MEDIASTORM_TENANT.label,
+    jobsPageUrl: MEDIASTORM_JOBS_PAGE_URL,
+    // 岗位详情有一份公开 JSON 接口（注入脚本被动捕获 + 内容脚本主动补拉）
+    source: 'api',
+    // 配色也来自租户表，不在这里再写一份色值
+    color: MEDIASTORM_TENANT.color,
+    textColor: MEDIASTORM_TENANT.textColor,
+    matches: MEDIASTORM_MATCHES,
+    hostnames: MEDIASTORM_HOSTNAMES,
+  },
+  /*
+   * 飞书招聘的其余租户由租户表派生：加一家公司只需在 feishu/tenants.ts 加一行
+   * （同时建一个 feishu/<公司>/ 入口目录），这里与 manifest、后台、侧边栏都不用改。
+   * 影视飓风是租户表里的第一家，已在上面显式列出（它与其他三家老站点并列，
+   * 便于一眼看见），这里跳过它以免重复。
+   *
+   * ⚠ 只认租户表里列出的子域，不放行整个 `*.jobs.feishu.cn`：后者等于申请一个
+   *   能读该平台上所有公司招聘页的主机权限（理由见 feishu/tenants.ts）。
+   */
+  ...FEISHU_ATS_TENANTS
+    .filter(tenant => tenant.id !== MEDIASTORM_SITE_ID)
+    .map(createFeishuTenantDescriptor),
 ]
+
+/** 租户 → 站点描述（主机权限、按钮配色、职位页都从租户表来） */
+function createFeishuTenantDescriptor(tenant: FeishuAtsTenant): SiteDescriptor {
+  return {
+    id: tenant.id,
+    label: tenant.label,
+    jobsPageUrl: tenantJobsPageUrl(tenant),
+    // 平台接口是公开的 JSON，取数方式与影视飓风完全相同
+    source: 'api',
+    color: tenant.color,
+    textColor: tenant.textColor,
+    matches: [`*://${tenantHostname(tenant)}/*`],
+    hostnames: [tenantHostname(tenant)],
+  }
+}

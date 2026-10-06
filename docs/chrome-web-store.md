@@ -48,5 +48,7 @@ https://raw.githubusercontent.com/imba97/offer-hunter/main/docs/privacy-policy.m
 **需请求主机权限的理由**
 
 ```
-只在已支持的招聘网站域名（当前为 zhipin.com、eleduck.com 与 v2ex.com / v2ex.co，与 manifest 的 host_permissions 一致）的职位页读取你正在查看的那个岗位信息，用于与你的简历做匹配分析；不读取 Cookie、不在页面上执行操作、不批量抓取，除你自己配置的 AI 接口外不向任何第三方发送数据。
+只在已支持的招聘网站域名（当前为 zhipin.com、eleduck.com、v2ex.com / v2ex.co 与 mediastorm.jobs.feishu.cn，与 manifest 的 host_permissions 一致）的职位页读取你正在查看的那个岗位信息，用于与你的简历做匹配分析；不读取 Cookie、不在页面上执行操作、不批量抓取，除你自己配置的 AI 接口外不向任何第三方发送数据。
+
+其中 mediastorm.jobs.feishu.cn 是影视飓风在飞书招聘上的租户子域。该平台为每家公司分配一个子域、共用同一套前端与接口，因此这里只申请已支持的那几家雇主的子域（见 src/sites/feishu/tenants.ts），而不是整个 *.jobs.feishu.cn（后者会覆盖该平台上所有公司的招聘页）。
 ```

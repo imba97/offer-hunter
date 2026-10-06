@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { bossSite } from '../boss'
 import { eleduckSite } from '../eleduck'
+import { mediastormSite } from '../feishu/mediastorm'
 import { contentScriptEntries, getJobSite, JOB_SITES } from '../registry'
 import { detectSite, getSiteDescriptor, SITE_DESCRIPTORS, siteMatches, supportedSitesLabel } from '../routing'
 import { v2exSite } from '../v2ex'
@@ -21,9 +22,11 @@ import { NON_SITE_URLS, SITE_PAGE_URLS } from './urlFixtures'
  *
  * 用 Vite 的 glob 而不是 fs + 相对路径：测出来的就是**构建脚本看到的同一份事实**
  * （scripts/build-sites.ts 也按目录约定发现站点），且不必猜测试进程的 cwd。
+ *
+ * ⚠ 用 `**` 而不是 `*`：站点可以嵌在平台目录下（`../feishu/mediastorm/content.ts`）。
  */
-const CONTENT_ENTRIES = Object.keys(import.meta.glob('../*/content.ts'))
-const INJECTED_ENTRIES = Object.keys(import.meta.glob('../*/injected.ts'))
+const CONTENT_ENTRIES = Object.keys(import.meta.glob('../**/content.ts'))
+const INJECTED_ENTRIES = Object.keys(import.meta.glob('../**/injected.ts'))
 
 describe('站点描述（SITE_DESCRIPTORS）', () => {
   it('id 唯一，且与适配器注册表的 id 一一对应', () => {
@@ -113,18 +116,38 @@ describe('适配器（JOB_SITES）', () => {
 
     expect(entries.map(e => e.siteId).sort()).toEqual(JOB_SITES.map(s => s.id).sort())
     for (const entry of entries) {
-      expect(entry.entry).toBe(`src/sites/${entry.siteId}/content.ts`)
+      /*
+       * 站点目录**可以嵌在平台目录下**（sites/feishu/mediastorm/）：飞书招聘是
+       * 「一套前端 + 一套接口 + 多家公司子域」，平台共用逻辑在 sites/feishu/，
+       * 每家公司是它下面的一个子目录。因此这里只钉住产物名（永远只取站点 id）
+       * 与「入口确实存在」，不再假设入口就在 sites/<id>/ 下。
+       */
       expect(entry.fileName).toBe(`${entry.siteId}.global.js`)
+      expect(entry.entry).toMatch(/^src\/sites\/.+\/content\.ts$/)
+      expect(entry.entry.endsWith(`/${entry.siteId}/content.ts`), entry.entry).toBe(true)
     }
 
     /*
      * manifest 只引用真实存在的产物：DOM-only 站点声明了 dist/injected/<id>.js
      * 而构建不会生成它的话，扩展会直接装不上（"Could not load javascript"）。
      * 构建脚本按「目录下有没有 injected.ts」发现站点，所以这里就查这个文件。
+     *
+     * ⚠ glob 用 `**` 而不是 `*`：租户目录嵌了一层（feishu/mediastorm/），`*` 看不到。
+     *   注入入口没有注册表可查（DOM 站点本就没有这个文件），因此按站点 id 反查：
+     *   `.../<站点 id>/injected.ts`。站点 id 等于它自己那个目录名（叶子目录），
+     *   这条约定由下面这组断言守着。
      */
+    const entryOf = new Map(entries.map(e => [e.siteId, e.entry]))
+
     for (const site of JOB_SITES) {
-      expect(CONTENT_ENTRIES, site.id).toContain(`../${site.id}/content.ts`)
-      const hasInjected = INJECTED_ENTRIES.includes(`../${site.id}/injected.ts`)
+      const entry = entryOf.get(site.id)
+      expect(entry, `${site.id} 没有内容脚本入口`).toBeDefined()
+      // 入口相对 src/sites 的路径 → vitest 里 import.meta.glob 的键（`../...`）
+      const relative = entry!.replace(/^src\/sites\//, '../')
+      expect(CONTENT_ENTRIES, site.id).toContain(relative)
+
+      const injectedEntry = relative.replace(/\/content\.ts$/, '/injected.ts')
+      const hasInjected = INJECTED_ENTRIES.includes(injectedEntry)
       expect(hasInjected, `${site.id} 的 source=${site.source} 与注入脚本入口不一致`)
         .toBe(site.source === 'api')
     }
@@ -151,6 +174,8 @@ describe('getJobSite / detectSite', () => {
     expect(getJobSite('boss')).toBe(bossSite)
     expect(getJobSite('eleduck')).toBe(eleduckSite)
     expect(getJobSite('v2ex')).toBe(v2exSite)
+    // 平台下的租户与老站点完全同形：按 id 取到的就是它目录里那个实例
+    expect(getJobSite('mediastorm')).toBe(mediastormSite)
   })
 
   it('未知 id 返回 undefined', () => {
