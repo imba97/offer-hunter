@@ -1,6 +1,7 @@
 import type { SiteMetaModules } from './site-metas'
 import type { SiteMeta } from './types'
 import { hostnameOf, isHostOf } from './hostnames'
+import { assertUniqueSiteIds } from './site-entry'
 import { buildSiteMetas } from './site-metas'
 
 /**
@@ -21,6 +22,13 @@ import { buildSiteMetas } from './site-metas'
 export const SITE_DESCRIPTORS: SiteMeta[] = buildSiteMetas(
   import.meta.glob<{ default: SiteMeta }>('./**/meta.ts', { eager: true }) as SiteMetaModules,
 )
+
+/*
+ * id 唯一性在这里就断言，而不是只留给构建脚本：`getSiteDescriptor` / `detectSite`
+ * 都是线性查找，两份 meta.ts 撞了 id 就会静默取到前一个（症状是「点开 A 站点，
+ * 面板却以为是 B」）。模块求值时抛错最省事 —— 后台装载或跑单测时当场暴露。
+ */
+assertUniqueSiteIds(SITE_DESCRIPTORS)
 
 /** 按 id 取站点描述 */
 export function getSiteDescriptor(id: string): SiteMeta | undefined {

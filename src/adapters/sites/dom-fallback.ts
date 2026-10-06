@@ -108,6 +108,47 @@ export function titleOnlyJob(title: string, baseJob: JobCore | undefined): JobCo
 }
 
 /**
+ * 「这两份**接口**数据说的是同一个岗位吗」，给「捕获到详情响应」那条路判重用。
+ *
+ * 与 `sameJobFromUrl` 的区别：那个比的是**页面地址**，这个比的是**两条接口数据**
+ * （捕获到响应时未必拿得到地址）。而各站点的身份来源不一致：
+ *
+ *  - 多数站点（电鸭 / V2EX / 飞书各租户）的 `site.naturalKey` 是稳定主键 → 比它
+ *  - BOSS 的 `naturalKey` **恒为空串**（securityId 每次访问都新签，当不了身份，
+ *    见 boss/api.ts 的说明），但同一个岗位在同一页面先后两次响应里 `securityId`
+ *    是一样的 → 那就比 `ids`
+ *
+ * ⚠ 比不出来时返回 **false**（宁可当成「可能是新岗位」去处理一次）。反方向错判成
+ *   「同一个」会让面板停在旧数据上不再更新，代价更大。
+ *   也正因为如此，这里**刻意不比 JD 文本**：增量渲染时同一岗位的文本本来就不同，
+ *   拿文本当判据会把「真的换了岗位」误判成同一个。
+ */
+export function sameApiView(existing: JobView, incoming: JobView): boolean {
+  if (existing.site.siteId !== incoming.site.siteId)
+    return false
+
+  const existingKey = existing.site.naturalKey
+  const incomingKey = incoming.site.naturalKey
+  if (existingKey && incomingKey)
+    return existingKey === incomingKey
+
+  /*
+   * 两边都没有稳定主键时，退回站点私有 id 的交集比对：只要**有一个共同的 id 值相同**
+   * 就认作同一个岗位。取交集而不是比整份对象，是因为各家塞进 `ids` 的字段不一样
+   * （BOSS 有 securityId / encryptJobId / encryptBossId，其中 encryptJobId 可能缺）。
+   */
+  const existingIds = existing.site.ids
+  const incomingIds = incoming.site.ids
+  if (!existingIds || !incomingIds)
+    return false
+
+  return Object.keys(existingIds).some((key) => {
+    const value = existingIds[key]
+    return Boolean(value) && incomingIds[key] === value
+  })
+}
+
+/**
  * 「是不是同一个岗位」的共用骨架，给**地址里带稳定标识**的 DOM 站点用。
  *
  * 电鸭（`/posts/<slug>`）与 V2EX（`/t/<id>`）的判据逐字相同，此前各写了一份 ——

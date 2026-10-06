@@ -123,7 +123,16 @@ export function defineSiteMeta<const T extends SiteMeta>(meta: T): T {
 
 /** 诊断面板要复验的一项：选择器还命中吗 */
 export interface SiteSelectorProbe {
+  /**
+   * 稳定标识（英文小驼峰）。
+   *
+   * ⚠ 这里**不要写给人看的文案**：它是测试与诊断结果里用来指认某一项的键，
+   *   文案一变断言就碎（此前把中文标题填在这个字段里，正是那个毛病）。
+   *   给人看的那份放 `label`。
+   */
   key: string
+  /** 展示用文案（中文）。界面读它；没有时退回 `key` */
+  label?: string
   selector: string
 }
 
@@ -218,6 +227,17 @@ interface JobSiteAdapterBase {
    * （如 BOSS 的 securityId），放进通用代码就等于把站点细节泄漏上去。
    */
   sameJob: (existing: JobView, jd: string) => boolean
+  /**
+   * 「这两份接口数据说的是同一个岗位吗」—— 捕获到详情响应那条路的判重。
+   *
+   * 与 `sameJob` 分开而不是合并：那个比的是页面地址（用户在页面上的位置），
+   * 这个比的是两条接口数据（可能拿不到地址）。
+   *
+   * ⚠ 必须**对本站点的真实身份来源**作答：BOSS 的 `naturalKey` 恒为空串，
+   *   只比它就会恒为 false、每次都当新岗位重处理（真机症状：同一份 JD 反复翻译
+   *   与广播）。共用实现见 `dom-fallback.ts` 的 `sameApiView`。
+   */
+  sameApiView: (existing: JobView, incoming: JobView) => boolean
   /** 造一个只带站点身份的空视图，供 DOM 兜底用 */
   emptyRef: (naturalKey: string) => SiteRef
 

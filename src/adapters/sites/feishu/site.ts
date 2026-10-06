@@ -1,6 +1,6 @@
 import type { ApiJobSiteAdapter, SiteMeta } from '../types'
 import type { SiteRef } from '~/logic/types'
-import { sameJobFromUrl } from '../dom-fallback'
+import { sameApiView, sameJobFromUrl } from '../dom-fallback'
 import { hostnameOf, isHostOf } from '../hostnames'
 import { defineSite } from '../types'
 import { fetchJobView, isDetailApiUrl, JOB_DETAIL_API, toJobView } from './api'
@@ -122,15 +122,18 @@ export function feishuAtsSite(
      */
     sameJob: (existing, jd) => sameJobFromUrl(positionIdFromUrl, existing, jd),
 
+    // 租户的 naturalKey 是岗位主键，直接用共用实现
+    sameApiView,
+
     emptyRef: (naturalKey): SiteRef => ({ siteId: meta.id, naturalKey }),
 
     diagnose() {
       const selectors = [
-        { key: '详情面板', selector: JOB_DETAIL_PANEL },
-        { key: '岗位名', selector: JOB_TITLE },
-        { key: '薪资行', selector: JOB_MONEY },
-        { key: 'JD 块容器', selector: JOB_CONTENT },
-        { key: 'JD 段落', selector: JOB_CONTENT_BLOCK },
+        { key: 'panel', label: '详情面板', selector: JOB_DETAIL_PANEL },
+        { key: 'title', label: '岗位名', selector: JOB_TITLE },
+        { key: 'money', label: '薪资行', selector: JOB_MONEY },
+        { key: 'jdContainer', label: 'JD 块容器', selector: JOB_CONTENT },
+        { key: 'jdBlocks', label: 'JD 段落', selector: JOB_CONTENT_BLOCK },
       ]
 
       return {

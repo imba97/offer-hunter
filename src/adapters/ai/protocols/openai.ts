@@ -5,7 +5,7 @@ import type {
   PingResult,
   ResolvedConfig,
 } from '../types'
-import { fetchWithTimeout } from '~/platform/http'
+import { requestWithTimeout } from '~/platform/http'
 import {
   AI_PING_TIMEOUT_MS,
   AI_REQUEST_TIMEOUT_MS,
@@ -110,7 +110,7 @@ export function createOpenAIProtocol(): AiProtocol {
       const started = Date.now()
       const url = `${stripTrailingSlash(config.baseUrl)}/chat/completions`
       try {
-        const res = await fetchWithTimeout(url, {
+        const res = await requestWithTimeout(url, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -125,7 +125,7 @@ export function createOpenAIProtocol(): AiProtocol {
           }),
         }, AI_PING_TIMEOUT_MS)
 
-        const raw = await res.json().catch(() => null)
+        const raw = res.json()
         const latencyMs = Date.now() - started
 
         if (!res.ok)
@@ -165,7 +165,7 @@ export function createOpenAIProtocol(): AiProtocol {
       if (req.json)
         body.response_format = { type: 'json_object' }
 
-      const res = await fetchWithTimeout(`${stripTrailingSlash(config.baseUrl)}/chat/completions`, {
+      const res = await requestWithTimeout(`${stripTrailingSlash(config.baseUrl)}/chat/completions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -174,7 +174,8 @@ export function createOpenAIProtocol(): AiProtocol {
         body: JSON.stringify(body),
       }, AI_REQUEST_TIMEOUT_MS)
 
-      const raw = await res.json().catch(() => null)
+      // 响应体已在请求内读完（超时覆盖到那一步），这里只解析
+      const raw = res.json()
 
       if (!res.ok)
         throw new Error(`[${config.model}] ${responseErrorDetail(raw, res.status)}`)

@@ -493,5 +493,11 @@ export interface DiagnosticResult {
     jdPreview: string
     error?: string
   } | null
-  selectors: Array<{ key: string, selector: string, found: boolean, count: number }>
+  /**
+   * 选择器命中情况。
+   *
+   * ⚠ `key` 是稳定标识（英文），`label` 才是给人看的文案：界面读 label，
+   *   测试与诊断结果按 key 指认某一项 —— 两者合一的话，改文案就会让断言碎掉。
+   */
+  selectors: Array<{ key: string, label?: string, selector: string, found: boolean, count: number }>
 }

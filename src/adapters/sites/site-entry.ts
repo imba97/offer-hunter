@@ -1,5 +1,3 @@
-import type { SiteMeta } from './types'
-
 /**
  * 构建脚本与注册表共用的**目录约定解析**。
  *
@@ -74,8 +72,17 @@ export function siteInjectedEntryOf(globKeys: string[]): Map<string, string> {
   return entries
 }
 
-/** 站点 id 唯一性检查（重复会让按 id 查表静默取到前一个） */
-export function assertUniqueSiteIds(metas: SiteMeta[]): void {
+/**
+ * 站点 id 唯一性检查（重复会让按 id 查表静默取到前一个）。
+ *
+ * 参数放宽成「有 id 就行」：Vite 侧（routing.ts）手上是描述，Node 侧（构建脚本）
+ * 手上也是描述，未来别处可能只是 id 列表 —— 这个检查本身跟描述的其余字段无关。
+ *
+ * ⚠ 两条入口都要调用它：Vite 侧在模块求值时调（后台装载、单测立刻暴露），
+ *   Node 侧在扫目录时调（构建期拦下）。只在一边调的话，另一边复制一份 meta.ts
+ *   忘了改 id 就会静默取到前一个站点。
+ */
+export function assertUniqueSiteIds(metas: Array<{ id: string }>): void {
   const seen = new Set<string>()
   for (const meta of metas) {
     if (seen.has(meta.id))

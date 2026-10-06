@@ -1,4 +1,5 @@
 import type { SiteRef } from '~/logic/types'
+import { sameApiView } from '../dom-fallback'
 import { hostnameOf, isHostOf } from '../hostnames'
 import { defineSite } from '../types'
 import { fetchJobDetail, fetchJobView, JOB_DETAIL_API, toJobView } from './api'
@@ -68,6 +69,9 @@ export default defineSite({
 
   readOutline: readJobOutlineFromDom,
 
+  // BOSS 的 naturalKey 恒为空串，判重只能看 ids（见 sameApiView 的说明）
+  sameApiView,
+
   /**
    * 是否同一个岗位。
    *
@@ -99,14 +103,18 @@ export default defineSite({
   }),
 
   diagnose() {
-    const selectorList: Array<[string, string]> = [
-      ['详情 JD', JOB_DETAIL_DESC],
-      ['详情容器', JOB_DETAIL_BOX],
-      ...JOB_TITLE_SELECTORS.map((s, i): [string, string] => [`岗位名候选 ${i + 1}`, s]),
-      ...JOB_COMPANY_SELECTORS.map((s, i): [string, string] => [`公司名候选 ${i + 1}`, s]),
+    /*
+     * 探针表：`key` 是稳定标识（英文，测试与诊断按它指认），`label` 是给人看的文案。
+     * ⚠ 不要往 `key` 里写中文 —— 那是「标识当文案用」，改文案就会让断言碎掉。
+     */
+    const probeList: Array<[string, string, string]> = [
+      ['jd', '详情 JD', JOB_DETAIL_DESC],
+      ['container', '详情容器', JOB_DETAIL_BOX],
+      ...JOB_TITLE_SELECTORS.map((s, i): [string, string, string] => [`title${i + 1}`, `岗位名候选 ${i + 1}`, s]),
+      ...JOB_COMPANY_SELECTORS.map((s, i): [string, string, string] => [`company${i + 1}`, `公司名候选 ${i + 1}`, s]),
     ]
 
-    const selectors = selectorList.map(([key, selector]) => ({ key, selector }))
+    const selectors = probeList.map(([key, label, selector]) => ({ key, label, selector }))
     const jd = readJdFromDom()
 
     return {

@@ -1,4 +1,5 @@
-import { fetchWithTimeout } from '~/platform/http'
+import type { TimedResponse } from '~/platform/http'
+import { requestWithTimeout } from '~/platform/http'
 
 /**
  * GitHub Gist 客户端：只做一件事 —— 按 ID/链接取一个 Gist 里的简历文件。
@@ -233,8 +234,8 @@ function requestHeaders(token: string): Record<string, string> {
 }
 
 /** 发一个请求，非 2xx 直接翻译成一句人话抛出去。token 可空 */
-async function request(path: string, token: string): Promise<Response> {
-  const res = await fetchWithTimeout(`${API_BASE}${path}`, {
+async function request(path: string, token: string): Promise<unknown> {
+  const res = await requestWithTimeout(`${API_BASE}${path}`, {
     headers: requestHeaders(token),
   }, GIST_REQUEST_TIMEOUT_MS)
 
@@ -242,31 +243,23 @@ async function request(path: string, token: string): Promise<Response> {
     throw new Error(gistErrorMessage(
       res.status,
       res.headers.get('x-ratelimit-remaining'),
-      await readApiMessage(res),
+      readApiMessage(res),
     ))
   }
 
-  return res
+  return parseJson(res)
 }
 
-async function parseJson(res: Response): Promise<unknown> {
-  try {
-    return await res.json()
-  }
-  catch {
+function parseJson(res: TimedResponse): unknown {
+  const raw = res.json()
+  if (raw === null && res.text.trim().length > 0)
     throw new Error('GitHub 返回的不是合法 JSON，请稍后重试')
-  }
+  return raw
 }
 
 /** 错误响应体形如 `{ message, documentation_url }`，取 message 补充细节 */
-async function readApiMessage(res: Response): Promise<string> {
-  try {
-    const raw = await res.json() as unknown
-    return readString((raw as Record<string, unknown> | null)?.message)
-  }
-  catch {
-    return ''
-  }
+function readApiMessage(res: TimedResponse): string {
+  return readString((res.json() as Record<string, unknown> | null)?.message)
 }
 
 /**
@@ -296,7 +289,7 @@ export async function fetchGistContent(
   if (!id)
     throw new Error('Gist 地址无法识别：请填写 Gist ID，或直接粘贴 gist.github.com 链接')
 
-  const raw = await parseJson(await request(`/gists/${id}`, token.trim()))
+  const raw = await request(`/gists/${id}`, token.trim())
 
   const gist = raw as Record<string, unknown> | null
   const details = readFileDetails(gist?.files)

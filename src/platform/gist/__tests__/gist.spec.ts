@@ -15,6 +15,11 @@ import {
  * 都很难从现象反推原因。
  *
  * 网络层用手写的假 Response，不依赖 jsdom 是否提供 fetch/Response。
+ *
+ * ⚠ 假对象必须给 `text()`：超时保护要盖住「读响应体」这一步，所以
+ *   `requestWithTimeout` 是在内部读 `text()` 的（见 platform/http.ts）。
+ *   只 mock `json()` 会在那里直接抛错 —— 真机上 `Response` 两个方法都有，
+ *   这里只是如实照着它做。
  */
 
 const GIST_ID = 'aa5a315d61ae9438b18d'
@@ -27,6 +32,7 @@ function fakeResponse(
     ok: status >= 200 && status < 300,
     status,
     headers: { get: (name: string) => headers[name.toLowerCase()] ?? null },
+    text: async () => JSON.stringify(body),
     json: async () => body,
   } as unknown as Response
 }

@@ -78,14 +78,24 @@ export function useResumeSourceSync(opts: UseResumeSourceSyncOptions) {
         throw new Error(res.error)
 
       const content = res.content
-      opts.onSynced(content)
-      items.value = content.items ?? []
 
-      // 空内容视为「这个来源没有远端内容可取」（例如手动输入），不改状态也不写简历
+      /*
+       * ⚠ 顺序要紧：**先判空 contentKey，再 onSynced**。
+       *
+       * 空 contentKey 是约定的信号「这个来源没有远端内容可取」（手动输入就是这样，
+       * 见 paste/index.ts）。而 onSynced 的消费方会**无条件**写简历
+       * （见 options/Options.vue 的 onSourceSynced）—— 先调它的话，一个返回空 key
+       * 的远程来源会把用户简历清空并盖上新的同步时间。
+       * 此前这里靠「只有 remote 来源才渲染面板」挡着，那是渲染层的巧合，不是契约。
+       */
       if (!content.contentKey) {
+        items.value = content.items ?? []
         status.value = 'idle'
         return
       }
+
+      opts.onSynced(content)
+      items.value = content.items ?? []
 
       message.value = `已同步 ${content.markdown.length} 字${content.label ? ` · ${content.label}` : ''}`
       status.value = 'ok'

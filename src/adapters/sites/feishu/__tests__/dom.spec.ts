@@ -386,9 +386,11 @@ describe('适配器契约', () => {
     const diag = site.diagnose()
     const keys = diag.selectors.map(s => s.key)
 
-    expect(keys).toContain('详情面板')
-    expect(keys).toContain('岗位名')
-    expect(keys).toContain('薪资行')
+    expect(keys).toContain('panel')
+    expect(keys).toContain('title')
+    expect(keys).toContain('money')
+    // 标识与文案分开：断言按 key（稳定），界面读 label（可改）
+    expect(diag.selectors.find(s => s.key === 'panel')?.label).toBe('详情面板')
     expect(diag.domOutline).toEqual({ jobName: '楼宇工程', brandName: '影视飓风' })
     expect(diag.jdLength).toBeGreaterThan(0)
   })

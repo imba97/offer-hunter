@@ -5,7 +5,7 @@ import type {
   PingResult,
   ResolvedConfig,
 } from '../types'
-import { fetchWithTimeout } from '~/platform/http'
+import { requestWithTimeout } from '~/platform/http'
 import {
   AI_PING_TIMEOUT_MS,
   AI_REQUEST_TIMEOUT_MS,
@@ -74,7 +74,7 @@ export function createAnthropicProtocol(
       const started = Date.now()
       const url = `${stripTrailingSlash(config.baseUrl)}/v1/messages`
       try {
-        const res = await fetchWithTimeout(url, {
+        const res = await requestWithTimeout(url, {
           method: 'POST',
           headers: buildHeaders(config.apiKey),
           body: JSON.stringify({
@@ -85,7 +85,7 @@ export function createAnthropicProtocol(
           }),
         }, AI_PING_TIMEOUT_MS)
 
-        const raw = await res.json().catch(() => null)
+        const raw = res.json()
         const latencyMs = Date.now() - started
 
         if (!res.ok)
@@ -115,7 +115,7 @@ export function createAnthropicProtocol(
     },
 
     async chat(req: ChatRequest, config: ResolvedConfig): Promise<ChatResponse> {
-      const res = await fetchWithTimeout(`${stripTrailingSlash(config.baseUrl)}/v1/messages`, {
+      const res = await requestWithTimeout(`${stripTrailingSlash(config.baseUrl)}/v1/messages`, {
         method: 'POST',
         headers: buildHeaders(config.apiKey),
         body: JSON.stringify({
@@ -130,7 +130,7 @@ export function createAnthropicProtocol(
         }),
       }, AI_REQUEST_TIMEOUT_MS)
 
-      const raw = await res.json().catch(() => null)
+      const raw = res.json()
 
       if (!res.ok)
         throw new Error(`[${config.model}] ${responseErrorDetail(raw, res.status)}`)

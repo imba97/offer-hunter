@@ -167,7 +167,7 @@ function shortUrl(url: string): string {
             class="flex items-center justify-between rounded px-1.5 py-1"
             :class="s.found ? 'bg-teal-50' : 'bg-red-50'"
           >
-            <span class="text-gray-700">{{ s.key }}</span>
+            <span class="text-gray-700">{{ s.label ?? s.key }}</span>
             <span :class="s.found ? 'text-teal-700' : 'text-red-600'">
               {{ s.found ? `命中 ${s.count}` : '未命中' }}
             </span>

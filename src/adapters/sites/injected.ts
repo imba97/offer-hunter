@@ -161,13 +161,19 @@ export function installInjectedCapture(options: InjectedOptions): void {
   const originalSend = XHR.send
 
   XHR.open = function patchedOpen(
-    this: XMLHttpRequest & { __ohUrl?: string },
+    this: XMLHttpRequest & { __ohUrl?: string, __ohHooked?: boolean },
     method: string,
     url: string | URL,
     ...rest: unknown[]
   ) {
     try {
       this.__ohUrl = typeof url === 'string' ? url : url.href
+      /*
+       * `open()` 是「这个 XHR 实例开始新一轮请求」的起点，所以在这里把「本次是否已
+       * 挂过监听」清掉 —— 页面复用同一个实例反复发请求时，每次都能重新采集。
+       * 状态放这里而不是 `send` 里，是因为 `once` 摘掉监听后 `send` 无从得知。
+       */
+      this.__ohHooked = false
     }
     catch {
       // 忽略
@@ -176,12 +182,20 @@ export function installInjectedCapture(options: InjectedOptions): void {
   }
 
   XHR.send = function patchedSend(
-    this: XMLHttpRequest & { __ohUrl?: string },
+    this: XMLHttpRequest & { __ohUrl?: string, __ohHooked?: boolean },
     ...args: unknown[]
   ) {
     try {
       const url = this.__ohUrl
-      if (url && isWatched(url)) {
+      /*
+       * ⚠ 一个 XHR 实例可能被页面复用，而 `send` 每次都往它身上挂监听器：不设护栏的话
+       *   第 k 次响应会触发 k 个监听器 → k 次 JSON.parse + k 次 postMessage（宿主页面
+       *   白挨开销，扩展侧还会重复翻译同一份岗位）。
+       *   因此每次请求只挂一个：`once` 保证响应后自动摘除，`__ohHooked` 防同一次请求
+       *   被重复 `send`（比如带重试的封装）挂上多个；`open()` 负责重置它。
+       */
+      if (url && isWatched(url) && !this.__ohHooked) {
+        this.__ohHooked = true
         this.addEventListener('load', () => {
           try {
             const data = JSON.parse(this.responseText)
@@ -191,7 +205,7 @@ export function installInjectedCapture(options: InjectedOptions): void {
           catch (e) {
             record(url, false, null, `parse: ${String(e)}`)
           }
-        })
+        }, { once: true })
       }
     }
     catch {

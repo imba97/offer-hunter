@@ -103,7 +103,12 @@ export function createContentScript(site: JobSiteAdapter): () => void {
       return false
 
     const existing = currentJob.value
-    if (existing?.source === 'api' && existing.site.naturalKey && existing.site.naturalKey === view.site.naturalKey)
+    /*
+     * 判重交给站点：身份来源各家不同（多数站点看 naturalKey，BOSS 只能看 ids，
+     * 因为它的 naturalKey 恒为空串）。此前这里写死「比 naturalKey」，于是 BOSS 上
+     * 判重恒不成立 —— 同一份详情响应每次都被重新翻译、重建视图并广播一次。
+     */
+    if (existing?.source === 'api' && apiSite.sameApiView(existing, view))
       return false
 
     currentJob.value = view
@@ -512,7 +517,7 @@ export function createContentScript(site: JobSiteAdapter): () => void {
       }
     }
 
-    result.selectors = siteDiag.selectors.map((probe: { key: string, selector: string }) => {
+    result.selectors = siteDiag.selectors.map((probe) => {
       let count = 0
       try {
         count = document.querySelectorAll(probe.selector).length
@@ -520,13 +525,15 @@ export function createContentScript(site: JobSiteAdapter): () => void {
       catch {
         count = 0
       }
-      return { key: probe.key, selector: probe.selector, found: count > 0, count }
+      // 逐字透传站点的探针（含 key 与 label），只补命中情况
+      return { ...probe, found: count > 0, count }
     })
 
     const jd = site.readJd()
     if (jd) {
       result.selectors.push({
-        key: '详情面板当前 JD',
+        key: 'currentJd',
+        label: '详情面板当前 JD',
         selector: '（已读取到文本）',
         found: true,
         count: jd.length,

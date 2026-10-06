@@ -1,5 +1,5 @@
 import type { SiteRef } from '~/logic/types'
-import { sameJobFromUrl } from '../dom-fallback'
+import { sameApiView, sameJobFromUrl } from '../dom-fallback'
 import { hostnameOf, isHostOf } from '../hostnames'
 import { defineSite } from '../types'
 import {
@@ -69,13 +69,15 @@ export default defineSite({
    */
   sameJob: (existing, jd) => sameJobFromUrl(topicIdFromUrl, existing, jd),
 
+  sameApiView,
+
   emptyRef: (naturalKey): SiteRef => ({ siteId: meta.id, naturalKey }),
 
   diagnose() {
     const selectors = [
-      { key: '帖子标题行', selector: TOPIC_TITLE },
-      { key: '节点链接（工作帖判据）', selector: JOB_NODE_LINK },
-      { key: '帖子正文', selector: TOPIC_CONTENT },
+      { key: 'title', label: '帖子标题行', selector: TOPIC_TITLE },
+      { key: 'nodeLink', label: '节点链接（工作帖判据）', selector: JOB_NODE_LINK },
+      { key: 'body', label: '帖子正文', selector: TOPIC_CONTENT },
     ]
 
     return {
