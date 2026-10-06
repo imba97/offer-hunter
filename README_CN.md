@@ -105,45 +105,39 @@ pnpm build
 
 ## 架构：三个可扩展点
 
-三处「会不断加东西」的地方都做成了适配器，新增一类只加文件、不改上层。
+三处「会不断加东西」的地方都做成了适配器，而且**都按目录约定自动索引**：
+新增一个 = 建一个目录，注册表、manifest、界面都不需要改。
 
-**AI 平台** —— `src/platform/ai/`
+**AI 平台** —— `src/platform/ai/platforms/<id>/index.ts`
 
-`protocol`（wire 格式）→ `platform`（声明式预设表）→ `factory`。新增一家只需在
-`platforms/index.ts` 的预设表加一行（声明默认地址、默认模型、结构化输出能力）。
+默认导出 `defineAiPlatform({ ... })`（协议、默认地址与模型、能力、展示文案）。
+`platforms/index.ts` 用 `import.meta.glob` 收全部平台，设置页下拉框与工厂都从它读。
 
-**简历来源** —— `src/logic/resume-sources/`
+**简历来源** —— `src/logic/resume-sources/<id>/index.ts`
 
-```text
-types.ts          适配器契约（配置字段声明 + normalize + fetch + identify）
-registry.ts       注册表：加一行
-gist.ts/paste.ts  各自实现
-```
+默认导出 `defineResumeSource({ ... })`。设置页的下拉框、来源表单、后台的消息路由
+都从注册表与适配器的声明读：界面由 `components/ResumeSourcePanel.vue` 按
+`configFields`（输入框）、`normalize`（输入收敛）、`itemField`（取完之后才能选的那一项）
+统一渲染，因此**一个普通来源不需要写任何界面代码**。同步编排（去抖、10 分钟节流、
+状态机）在 `useResumeSourceSync.ts` 里共用。
 
-新增来源 = 加一个适配器文件 + 在 `registry.ts` 加一行 + 在 `ResumeSourceId` 加一个值。
-设置页的下拉框、来源表单、后台的消息路由都从注册表与适配器的声明读，**都不需要改**：
-界面由 `components/ResumeSourcePanel.vue` 按 `configFields`（输入框）、`normalize`
-（输入收敛）、`itemField`（取完之后才能选的那一项）统一渲染，因此**一个普通来源
-不需要写任何界面代码**。同步编排（去抖、10 分钟节流、状态机）在
-`useResumeSourceSync.ts` 里共用。
-
-**招聘网站** —— `src/sites/`
+**招聘网站** —— `src/sites/<id>/`
 
 ```text
-types.ts             适配器契约（含 source: 'api' | 'dom' 两种取数方式）
-site-descriptors.ts  纯数据（id / 名字 / 职位页 / 配色 / 匹配域名 / 取数方式）—— 后台与构建脚本读它
-routing.ts           数据驱动的路由（认站点、匹配模式、提示文案）
-registry.ts          完整适配器清单
-boss/ eleduck/ v2ex/ 一个站点一个目录，放该站点的全部私有逻辑
-feishu/              飞书招聘（多租户平台）：平台共用逻辑 + 租户表 + 各租户入口目录
+meta.ts       纯数据：defineSiteMeta({ id / 名字 / 职位页 / 配色 / 匹配域名 / 取数方式 })
+index.ts      适配器：defineSite({ meta, ... })，默认导出
+content.ts    内容脚本入口（每个站点一份）
+injected.ts   MAIN world 注入脚本入口（只有 source: 'api' 的站点需要）
 ```
 
-新增站点 = 加一个 `sites/<id>/` 目录（`index.ts` 适配器 + `content.ts` 入口，
-**有接口的站点再加一个 `injected.ts`**）+ 在描述表加一项 + 在注册表加一行。
+注册表（`registry.ts`）glob 各站点的 `index.ts`，路由器（`routing.ts`）glob 各站点的
+`meta.ts` —— 后者只含纯数据，因此后台包不会被拖进任何选择器与 DOM 代码。
 **manifest 的主机权限与 content_scripts、构建的产物路径全部自动派生**，
 后台的标签页路由、侧边栏的平台按钮与配色、AI 提示词也都不需要改。
-平台类站点（飞书招聘）多一层：平台共用逻辑在 `sites/feishu/`，
-每家公司是它下面的一个子目录（`sites/feishu/mediastorm/`），站点 id 取叶子目录名。
+
+平台类站点（飞书招聘这种「一套前端 + 一家一个子域」的）多一层：平台共用逻辑在
+`src/platform/feishu/`，每个租户仍是 `src/sites/<公司>/`（与其他站点同形，
+meta 自己声明公司名与子域，index 一行 `feishuAtsSite(meta, { subdomain, path })`）。
 
 岗位账本以 `siteId:naturalKey` 为键（见 `logic/types.ts` 的 `recordKey`），
 旧数据（键只是 BOSS 的 securityId）在启动时迁移一次，不会丢。

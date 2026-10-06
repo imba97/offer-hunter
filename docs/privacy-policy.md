@@ -313,11 +313,11 @@ Offer Hunter（下称"本扩展"）是一个开源的浏览器扩展，用于在
 | 发往 AI 的确切内容（简历 + 岗位字段 + JD） | `src/platform/ai/matching.ts:259-274`、`:348-365` |
 | 站点私有字段刻意不进提示词 | `src/platform/ai/matching.ts:193-223` |
 | 超长输入的截断规则 | `src/platform/ai/matching.ts:57-91` |
-| 五个平台与默认地址、模型、输入上限 | `src/platform/ai/platforms/index.ts:40-126` |
+| 五个平台与默认地址、模型、输入上限 | `src/platform/ai/platforms/`（每个平台一个目录，`index.ts` 里声明）与 `platforms/index.ts`（按目录约定索引） |
 | 连通性测试只发一句 `回复 ok` | `src/platform/ai/protocols/openai.ts:109-126` |
 | 超时值（AI 90s / 测试与 Gist 20s），无自动重试、无手动取消 | `src/platform/http.ts:9-38`、`src/platform/ai/protocols/http.ts:16-19`、`src/platform/gist/gist.ts:28` |
 | Gist 请求发往 `api.github.com`，token 可选且以 Bearer 发送 | `src/platform/gist/gist.ts:22`、`:224-244` |
-| Gist token 明文存在 `offer-hunter-resume` 里 | `src/logic/resume-sources/gist.ts:15-25`、`:49-57` |
+| Gist token 明文存在 `offer-hunter-resume` 里 | `src/logic/resume-sources/gist/index.ts`（配置与存储键） |
 | 打开设置页会自动同步一次 Gist（同内容 10 分钟节流） | `src/logic/resume-sources/useResumeSourceSync.ts:28-35`、`:136-144` |
 | AI 调用只由用户点击触发 | `src/sidepanel/Sidepanel.vue:214-283`、`src/background/main.ts:285-294` |
 | 招呼语只写剪贴板、不读剪贴板 | `src/sidepanel/Sidepanel.vue:285-292` |
@@ -325,8 +325,8 @@ Offer Hunter（下称"本扩展"）是一个开源的浏览器扩展，用于在
 | `activeTab` 已声明但代码中未使用（多余权限面） | `src/manifest.ts:87`（全仓库无对应 API 调用） |
 | `tabs` 只读取当前窗口的活动标签页，其他标签页被直接丢弃 | `src/sidepanel/state.ts:61-67`、`:150-151` |
 | MAIN 世界脚本只解析已声明接口路径，且不产生新请求 | `src/sites/injected.ts:39-110`、`:116-201` |
-| 有接口可取的站点的岗位接口请求由页面上下文发出（浏览器自动附加该站 Cookie） | `src/sites/boss/api.ts:22-26`、`:140-144`；`src/sites/feishu/api.ts`（`fetchDetailPayload`）、`src/sites/feishu/site.ts`（`fetchView` / `probeDetail`） |
-| 只申请租户表里列出的那些飞书招聘子域（不是整个 `*.jobs.feishu.cn`） | `src/sites/feishu/tenants.ts`（`FEISHU_ATS_TENANTS`、`tenantHostname`）、`src/sites/site-descriptors.ts`、`src/sites/feishu/site.ts`（`matchUrl`） |
+| 有接口可取的站点的岗位接口请求由页面上下文发出（浏览器自动附加该站 Cookie） | `src/sites/boss/api.ts:22-26`、`:140-144`；`src/platform/feishu/api.ts`（`fetchDetailPayload`）、`src/platform/feishu/site.ts`（`fetchView` / `probeDetail`） |
+| 只申请租户表里列出的那些飞书招聘子域（不是整个 `*.jobs.feishu.cn`） | `src/platform/feishu/tenants.ts`（`FEISHU_ATS_TENANTS`、`tenantHostname`）、`src/sites/mediastorm/meta.ts`（匹配地址）、`src/platform/feishu/site.ts`（`matchUrl`） |
 | 不声明 `web_accessible_resources`，界面全在侧边栏 | `src/manifest.ts:95-96` |
 | 无遥测 / 分析 / 远程配置 / 远程代码 | 全仓库检索 `analytics`、`telemetry`、`sentry`、`beacon`、`gtag` 等关键词均无匹配；发布版 CSP 为 `script-src 'self'`（`src/manifest.ts:97-102`） |
 
@@ -337,3 +337,4 @@ Offer Hunter（下称"本扩展"）是一个开源的浏览器扩展，用于在
 ## 附录 B：一句话版本
 
 **没有服务器，没有账号，没有埋点。** 你的简历与 API Key 只存在你自己的浏览器里；只有当你点击分析或生成时，简历与岗位信息才会发给你自己选择的 AI 平台；除此之外它只会做两件事 —— 读取你正在看的那个岗位，以及（仅当你配置了 Gist 简历）同步一次简历。想全部抹掉，点一下"清空本地数据"。
+

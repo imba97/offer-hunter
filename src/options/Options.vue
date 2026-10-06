@@ -1,17 +1,18 @@
 <script setup lang="ts">
 import type { AiPlatformName, AiSettings, PromptSettings, Resume, ResumeSourceId } from '~/logic/types'
 import { computed, defineAsyncComponent, defineComponent, h, ref } from 'vue'
+import { AI_PLATFORM_OPTIONS } from '~/adapters/ai/platforms'
+import {
+  getResumeSource,
+  normalizeResumeSource,
+  resumeSourceOptions,
+} from '~/adapters/resume-sources/registry'
 import logo from '~/assets/logo.png'
 import PromptField from '~/components/PromptField.vue'
 import ResumeSourcePanel from '~/components/ResumeSourcePanel.vue'
 import ScrollArea from '~/components/ScrollArea.vue'
 import SecretInput from '~/components/SecretInput.vue'
 import { callBackground } from '~/logic/messaging'
-import {
-  getResumeSource,
-  normalizeResumeSource,
-  resumeSourceOptions,
-} from '~/logic/resume-sources/registry'
 import { readRetentionSettings, resetAllStorage, useStoredValue, writeRetentionSettings } from '~/logic/storage'
 import {
   createDefaultAiSettings,
@@ -20,13 +21,12 @@ import {
   createEmptyResume,
   RETENTION_DAY_OPTIONS,
 } from '~/logic/types'
-import { AI_PLATFORM_OPTIONS } from '~/platform/ai/platforms'
 
 /**
  * 设置页：简历维护 + 提示词 + AI 平台配置。
  *
  * 独立标签页打开，空间充足（侧边栏太窄，放不下编辑器与完整表单）。
- * 简历来源是**可插拔的**（见 logic/resume-sources）：下拉框与来源表单都由注册表
+ * 简历来源是**可插拔的**（见 adapters/resume-sources）：下拉框与来源表单都由注册表
  * 与适配器声明驱动，加一个新来源不需要改本文件。
  *
  * 存储统一走 logic/storage 的 useStoredValue，保证与 service worker 侧

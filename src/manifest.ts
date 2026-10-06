@@ -1,8 +1,8 @@
 import type { Manifest } from 'webextension-polyfill'
 import type PkgType from '../package.json'
+import type { SiteMeta } from './adapters/sites/types'
 import { readFile } from 'node:fs/promises'
 import { isDev, isFirefox, port, r } from '../scripts/utils'
-import { SITE_DESCRIPTORS, siteMatches } from './sites/routing'
 
 /**
  * 从站点描述生成 content_scripts。
@@ -17,14 +17,15 @@ import { SITE_DESCRIPTORS, siteMatches } from './sites/routing'
  * 需要捕获，注入 MAIN 脚本等于给宿主页面白挂一层 fetch/XHR 包装。
  *
  * 每个站点单独打包（sites/<id>/injected.ts 与 sites/<id>/content.ts），
- * 因此新增站点只是多一组条目，不会改动既有站点的产物。
+ * 因此新增站点只是多一组条目，不会改动既有站点的产物 —— 而且**本文件也不用改**：
+ * 站点清单由调用方按目录约定扫出来（见 scripts/site-descriptors.ts）。
  *
  * ⚠ 产物路径的命名约定必须与 vite.config.content.mts / vite.config.injected.mts
  *   一致（`<id>.global.js` / `<id>.js`），且站点 id 必须等于目录名。
  *   对不上会表现成「构建成功但脚本没注入」——src/__tests__/manifest.spec.ts 钉住了它。
  */
-function siteContentScripts(): Manifest.WebExtensionManifest['content_scripts'] {
-  return SITE_DESCRIPTORS.flatMap((site) => {
+function siteContentScripts(descriptors: SiteMeta[]): Manifest.WebExtensionManifest['content_scripts'] {
+  return descriptors.flatMap((site) => {
     const isolated = {
       matches: site.matches,
       js: [`dist/contentScripts/${site.id}.global.js`],
@@ -46,7 +47,14 @@ function siteContentScripts(): Manifest.WebExtensionManifest['content_scripts'] 
   })
 }
 
-export async function getManifest() {
+/**
+ * 生成 manifest。
+ *
+ * `descriptors` 由调用方传入（而不是在这里 glob）是为了让它**既能在 Node 里跑
+ * 也能在测试里跑**：Node 里没有 Vite 的 `import.meta.glob`（见
+ * scripts/site-descriptors.ts），而测试里可以自己 glob 一份，两边都不必改本文件。
+ */
+export async function getManifest(descriptors: SiteMeta[]) {
   const pkg = JSON.parse(await readFile(r('package.json'), 'utf-8')) as typeof PkgType
 
   // update this file to update this manifest.json
@@ -119,10 +127,10 @@ export async function getManifest() {
       // 侧边栏是主要交互界面（浏览器原生，不存在遮挡与定位问题）
       'sidePanel',
     ],
-    // 主机权限由注册表生成：只申请各站点适配器声明的那几个域名，
+    // 主机权限由站点描述生成：只申请各站点自己声明的那几个域名，
     // 而不是「所有网站」。加站点时这里是自动的。
-    host_permissions: siteMatches(),
-    content_scripts: siteContentScripts(),
+    host_permissions: descriptors.flatMap(site => site.matches),
+    content_scripts: siteContentScripts(descriptors),
     // 刻意不声明 web_accessible_resources：内容脚本不再渲染任何界面资源
     // （界面全在侧边栏），没有需要暴露给页面的文件，少一处可被页面探测的指纹。
     content_security_policy: {

@@ -1,4 +1,4 @@
-import type { ResumeSourceId } from './resume-sources/types'
+import type { ResumeSourceId } from '~/adapters/resume-sources/types'
 
 /**
  * 全局领域模型。storage / content-script / background 三方共享，
@@ -9,7 +9,15 @@ import type { ResumeSourceId } from './resume-sources/types'
 // AI 平台配置
 // ---------------------------------------------------------------------------
 
-export type AiPlatformName = 'deepseek' | 'openai' | 'anthropic' | 'kimi' | 'custom'
+/**
+ * AI 平台标识。
+ *
+ * 与 `SiteId` / `ResumeSourceId` 一样是**开放字符串**：平台是按目录约定自动索引的
+ * （`platform/ai/platforms/<id>/index.ts`），闭合联合会逼着「加一家平台还要改领域模型」。
+ * 代价是拼错 id 编译器不再拦，改由测试兜底（见 platform/ai/__tests__ 与
+ * `createAiProvider` 在未知 id 上抛错）。
+ */
+export type AiPlatformName = string
 
 export interface AiSettings {
   platform: AiPlatformName
@@ -36,10 +44,10 @@ export function createDefaultAiSettings(): AiSettings {
 // ---------------------------------------------------------------------------
 
 /**
- * 简历来源标识与适配器契约都在 logic/resume-sources 下（那套是可插拔的）。
+ * 简历来源标识与适配器契约都在 adapters/resume-sources 下（那套是可插拔的）。
  * 这里只做类型转出，让 storage / 内容脚本继续从「全局领域模型」这一个地方取类型。
  */
-export type { ResumeSourceId } from './resume-sources/types'
+export type { ResumeSourceId } from '~/adapters/resume-sources/types'
 
 /**
  * 简历。
@@ -63,7 +71,7 @@ export interface Resume {
    *
    * 此前这里是 `gist: GistSource` 这样的**强类型兄弟字段**，加第二个来源就得往
    * Resume 上加一个字段、改 createEmptyResume、再改迁移逻辑。现在来源是可插拔的
-   * （见 logic/resume-sources），域模型不能提前知道有哪些来源，只能给一张映射表。
+   * （见 adapters/resume-sources），域模型不能提前知道有哪些来源，只能给一张映射表。
    *
    * 用 `Partial` 是因为旧数据里未必每个来源都有配置；读取时由适配器的
    * createConfig() 补齐（见 storage.ts 的迁移）。
@@ -171,11 +179,11 @@ export function createDefaultRetentionSettings(): RetentionSettings {
 /**
  * 招聘网站标识。
  *
- * 刻意是**开放字符串**而不是字面量联合：站点是可插拔的（见 src/sites/），
+ * 刻意是**开放字符串**而不是字面量联合：站点是可插拔的（见 src/adapters/sites/），
  * 而领域模型不该反过来知道有哪些站点 —— 闭合联合会逼着「加一个站点」还要改这里，
  * 那正是这次重构要消掉的那种耦合。
  *
- * 代价是拼错 id 不会被编译器拦住，改由 src/sites/__tests__ 的两条不变量兜底：
+ * 代价是拼错 id 不会被编译器拦住，改由 src/adapters/sites/__tests__ 的两条不变量兜底：
  * id 在注册表内唯一、且与 sites/<id>/ 目录名一致。
  */
 export type SiteId = string

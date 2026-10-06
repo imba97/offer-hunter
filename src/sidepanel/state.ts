@@ -1,7 +1,7 @@
 import type { DiagnosticResult, JobRecord, JobView } from '~/logic/types'
 import { reactive } from 'vue'
+import { detectSite } from '~/adapters/sites/routing'
 import { callBackground, onPageBroadcast } from '~/logic/messaging'
-import { detectSite } from '~/sites/routing'
 
 /**
  * 侧边栏的共享状态。

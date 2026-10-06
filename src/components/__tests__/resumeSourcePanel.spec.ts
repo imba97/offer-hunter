@@ -1,8 +1,8 @@
-import type { ResumeSourceAdapter } from '~/logic/resume-sources/types'
+import type { ResumeSourceAdapter } from '~/adapters/resume-sources/types'
 import { mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import gistSource from '~/adapters/resume-sources/gist'
 import { callBackground } from '~/logic/messaging'
-import { gistSource } from '~/logic/resume-sources/gist'
 import ResumeSourcePanel from '../ResumeSourcePanel.vue'
 
 /**

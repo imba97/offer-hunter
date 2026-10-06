@@ -105,41 +105,40 @@ These are deliberate constraints, not a backlog:
 
 ## Architecture: three extension points
 
-The three places that will keep growing are all adapters — adding one means adding
-files, not editing the layers above.
+The three places that will keep growing are all adapters, and all three are
+**indexed from the directory layout**: adding one means adding a directory, not
+editing a registry, the manifest or the UI.
 
-**AI platforms** — `src/platform/ai/`: `protocol` (wire format) → `platform`
-(declarative preset table) → `factory`. A new provider is one row in
-`platforms/index.ts` (default base URL, model, structured-output capability).
+**AI platforms** — `src/platform/ai/platforms/<id>/index.ts`, default-exporting
+`defineAiPlatform({ ... })`. `platforms/index.ts` globs them for the factory and
+the settings dropdown.
 
-**Resume sources** — `src/logic/resume-sources/`: an adapter contract
-(`types.ts`), a registry (one line per source), and one file per source.
-A new source is a new adapter file plus a registry line plus one value on
-`ResumeSourceId`. The settings dropdown, the source form, and the background
-message routing all read the registry and the adapter's declarations, so none of
-them needs editing: the form is rendered from `configFields` (inputs),
+**Resume sources** — `src/logic/resume-sources/<id>/index.ts`, default-exporting
+`defineResumeSource({ ... })`. The settings dropdown, the source form and the
+background message routing all read the registry and the adapter's declarations,
+so none of them needs editing: the form is rendered from `configFields` (inputs),
 `normalize` (input coercion) and `itemField` (the item you can only pick after a
 fetch) by `components/ResumeSourcePanel.vue` — **an ordinary source needs no UI
 code at all**. The sync orchestration (debounce, a 10-minute throttle, the status
 machine) is shared in `useResumeSourceSync.ts`.
 
-**Job sites** — `src/sites/`:
+**Job sites** — `src/sites/<id>/`:
 
 ```text
-types.ts             the adapter contract (including source: 'api' | 'dom')
-site-descriptors.ts  pure data (id / label / jobs page / colours / matches) — read by the background and build scripts
-routing.ts           data-driven routing (which site a tab belongs to, prompt copy)
-registry.ts          the full adapter list
-boss/ eleduck/ v2ex/ one directory per site, holding that site's private logic
-feishu/              Feishu ATS (a multi-tenant platform): shared platform logic + tenant table + one entry directory per tenant
+meta.ts      pure data: defineSiteMeta({ id / label / jobs page / colours / matches / source })
+index.ts     the adapter: defineSite({ meta, ... }), default-exported
+content.ts   the content-script entry (one per site)
+injected.ts  the MAIN-world entry (only for source: 'api' sites)
 ```
 
-A new site is that directory plus a descriptor entry plus a registry line; **the
-manifest's host permissions, content scripts and build output paths are all derived
-automatically**, so tab routing, the side panel buttons and the AI prompts need no
-changes. Platform sites (Feishu ATS) add one level: shared logic in `sites/feishu/`,
-one subdirectory per employer (`sites/feishu/mediastorm/`), and the site id is the
-leaf directory name.
+The registry (`registry.ts`) globs each site's `index.ts`; the router (`routing.ts`)
+globs each site's `meta.ts` — the latter is pure data, so the background bundle
+never pulls in selectors or DOM code. **The manifest's host permissions, content
+scripts and build output paths are all derived automatically**, so tab routing, the
+side panel buttons and the AI prompts need no changes. Platform sites (Feishu ATS:
+one shared frontend, one subdomain per employer) add a shared layer under
+`src/platform/feishu/`; each tenant is still a normal `src/sites/<company>/`
+directory whose adapter is one `feishuAtsSite(meta, { subdomain, path })` call.
 
 The job ledger is keyed by `siteId:naturalKey` (see `recordKey` in
 `logic/types.ts`); data from the single-site era is migrated on startup.

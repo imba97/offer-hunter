@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import type { ResumeConfigField, ResumeContent, ResumeSourceAdapter } from '~/logic/resume-sources/types'
+import type { ResumeConfigField, ResumeContent, ResumeSourceAdapter } from '~/adapters/resume-sources/types'
 import { computed, ref, watch } from 'vue'
+import { useResumeSourceSync } from '~/adapters/resume-sources/useResumeSourceSync'
 import SecretInput from '~/components/SecretInput.vue'
-import { useResumeSourceSync } from '~/logic/resume-sources/useResumeSourceSync'
 import { str } from '~/logic/strings'
 
 /**

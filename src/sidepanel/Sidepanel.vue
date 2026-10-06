@@ -1,11 +1,11 @@
 <script setup lang="ts">
+import type { GreetingResult } from '~/adapters/ai/matching'
 import type { DiagnosticResult, JobRecord, JobView, MatchResult } from '~/logic/types'
-import type { GreetingResult } from '~/platform/ai/matching'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { SITE_DESCRIPTORS, supportedSitesLabel } from '~/adapters/sites/routing'
 import ScrollArea from '~/components/ScrollArea.vue'
 import { callBackground } from '~/logic/messaging'
 import { jobIdentity, recordKey } from '~/logic/types'
-import { SITE_DESCRIPTORS, supportedSitesLabel } from '~/sites/routing'
 import { MessageBox } from './message-box'
 import MessageBoxHost from './MessageBox.vue'
 import {

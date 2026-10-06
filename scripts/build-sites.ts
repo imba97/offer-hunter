@@ -12,7 +12,7 @@ import { isDev, log, r } from './utils'
  * 会报 "Multiple entry points are not supported when output formats include umd or iife"。
  * 于是循环搬到这里：每个站点各跑一次配置，产物互相独立。
  *
- * 站点清单用**目录约定**发现（src/sites/<id>/ 下有 content.ts 就算一个站点），
+ * 站点清单用**目录约定**发现（src/adapters/sites/<id>/ 下有 content.ts 就算一个站点），
  * 与 sites/registry.ts 的注册项保持一致 —— 加一个站点目录 + 注册一行。
  * 只读 DOM 的站点没有 injected.ts，因此内容脚本这一趟会发现它、注入脚本那一趟不会。
  *
@@ -24,7 +24,7 @@ import { isDev, log, r } from './utils'
 
 type Target = 'content' | 'injected'
 
-const SITES_DIR = r('src/sites')
+const SITES_DIR = r('src/adapters/sites')
 
 /**
  * 站点 id → 入口文件绝对路径（该目标对应的那个入口）。
@@ -33,8 +33,8 @@ const SITES_DIR = r('src/sites')
  *   飞书招聘这类「一套前端 + 一套接口 + 多家公司子域」的平台，平台共用逻辑放在
  *   `sites/<平台>/`，每家公司是它下面的一个子目录。因此这里**按叶子目录名取站点
  *   id**（`mediastorm`），并递归一层去找入口 —— 站点 id 仍然等于它自己那个目录名，
- *   「id 与目录名一致」这条约定没有被破坏（见 src/sites/types.ts 与
- *   src/sites/__tests__/registry.spec.ts）。
+ *   「id 与目录名一致」这条约定没有被破坏（见 src/adapters/sites/types.ts 与
+ *   src/adapters/sites/__tests__/registry.spec.ts）。
  *
  * 之所以只递归一层而不是任意深度：`sites/<平台>/<站点>/` 已经够表达「平台 + 租户」，
  * 再深就该重新想抽象了 —— 而那种结构下「站点 id 取自哪个目录」会变得含糊。
@@ -65,7 +65,7 @@ function discoverSites(target: Target): Map<string, string> {
   }
 
   if (found.size === 0)
-    throw new Error(`src/sites/ 下没有找到任何含 ${entryName} 的站点目录`)
+    throw new Error(`src/adapters/sites/ 下没有找到任何含 ${entryName} 的站点目录`)
 
   return found
 }

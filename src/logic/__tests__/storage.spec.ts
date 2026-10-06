@@ -1,6 +1,6 @@
 import type { JobRecord } from '../types'
 import { describe, expect, it } from 'vitest'
-import { normalizeResumeSource } from '../resume-sources/registry'
+import { normalizeResumeSource } from '~/adapters/resume-sources/registry'
 import {
   ensureSourceConfigs,
   mergeDefaults,

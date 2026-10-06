@@ -1,7 +1,9 @@
 import type { JobCore, JobRecord, JobView, MatchResult } from '~/logic/types'
 import { onMessage, sendMessage } from 'webext-bridge/background'
+import { generateGreeting, matchJob, testAiConnection } from '~/adapters/ai/matching'
+import { getResumeSource } from '~/adapters/resume-sources/registry'
+import { detectSite, SITE_DESCRIPTORS } from '~/adapters/sites/routing'
 import { broadcastToPages, handleBackgroundRequests } from '~/logic/messaging'
-import { getResumeSource } from '~/logic/resume-sources/registry'
 import {
   readAiSettings,
   readPromptSettings,
@@ -10,8 +12,6 @@ import {
   upsertRecord,
 } from '~/logic/storage'
 import { ensureStoreReady } from '~/logic/store/ready'
-import { generateGreeting, matchJob, testAiConnection } from '~/platform/ai/matching'
-import { detectSite, SITE_DESCRIPTORS } from '~/sites/routing'
 
 /**
  * 后台 service worker。
@@ -23,7 +23,7 @@ import { detectSite, SITE_DESCRIPTORS } from '~/sites/routing'
  *  3. 账本读写
  *  4. **为侧边栏转发请求到内容脚本** —— 侧边栏没有页面访问权，
  *     而需要页面 Cookie 的接口只能由内容脚本代发（见站点适配器的 source）
- *  5. 简历来源取数（可插拔，见 logic/resume-sources）
+ *  5. 简历来源取数（可插拔，见 adapters/resume-sources）
  *
  * ⚠ 本文件**不得出现任何具体站点名或域名**：站点判断一律经 sites/registry。
  *   这是「加第二个招聘网站时这里不用改」的保证。

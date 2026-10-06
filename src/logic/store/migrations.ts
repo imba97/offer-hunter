@@ -1,5 +1,5 @@
 import type { JobRecord, Resume, ResumeSourceId } from '~/logic/types'
-import { RESUME_SOURCES } from '~/logic/resume-sources/registry'
+import { RESUME_SOURCES } from '~/adapters/resume-sources/registry'
 import { str } from '~/logic/strings'
 import { createEmptyResume } from '~/logic/types'
 
