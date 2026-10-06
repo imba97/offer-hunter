@@ -65,7 +65,44 @@ export function useResumeSourceSync(opts: UseResumeSourceSyncOptions) {
     return error instanceof Error ? error.message : String(error)
   }
 
+  /**
+   * 「这份内容是不是刚刚取过」。
+   *
+   * ⚠ 判据是**前缀**而不是完全相等，这是防回环的关键：适配器 `identify(config)` 算出的
+   *   标识是「配置能确定的那部分」（例如 `<gistId>|`，因为文件名还没回写），而
+   *   `fetch` 返回的 `contentKey` 带上了实际取到的子项（`<gistId>|resume.md`）。
+   *   要求两者完全相等的话，自动挑文件那一次之后就会一直对不上 ——
+   *   防回环与 10 分钟节流同时失效，同一份内容每次打开设置页都白取一次
+   *   （烧 GitHub 匿名额度）。
+   *
+   * 前缀撞车的可能性可以忽略：Gist id 有 20+ 位十六进制，且后面紧跟 `|` 分隔符。
+   */
+  function sameContent(identifyKey: string, contentKey: string): boolean {
+    return identifyKey.startsWith(contentKey) || contentKey.startsWith(identifyKey)
+  }
+
+  /** 与已记录的任一份内容相同（含前缀关系） */
+  function anySameContent(identifyKey: string, keys: Set<string>): boolean {
+    for (const key of keys) {
+      if (sameContent(identifyKey, key))
+        return true
+    }
+    return false
+  }
+
+  /**
+   * 同步请求的序号，只允许最新一次的响应改写状态。
+   *
+   * ⚠ 必须有这个保护：`sync()` 没有重入限制（自动同步在途时用户再点一次「同步」、
+   *   或在途时又改了配置），两个请求并发时**后返回的那个赢** —— 旧响应会把新内容
+   *   覆盖掉，还会把 `lastSyncKey/lastSyncAt` 记成上一份，于是下一次又变成
+   *   「同一份内容再取一次」。
+   */
+  let syncSeq = 0
+
   async function sync(): Promise<void> {
+    const seq = ++syncSeq
+
     status.value = 'syncing'
     error.value = ''
 
@@ -73,6 +110,10 @@ export function useResumeSourceSync(opts: UseResumeSourceSyncOptions) {
       const res = await callBackground<
         { ok: true, content: ResumeContent } | { ok: false, error: string }
       >('resume-source:fetch', { sourceId: opts.adapter.id, config: opts.config() })
+
+      // 期间又发起了新的同步：这次的响应已经过期，一个字段都不该写
+      if (seq !== syncSeq)
+        return
 
       if (!res.ok)
         throw new Error(res.error)
@@ -104,6 +145,9 @@ export function useResumeSourceSync(opts: UseResumeSourceSyncOptions) {
       syncedKeys.add(content.contentKey)
     }
     catch (err) {
+      // 过期请求的失败同样不该覆盖新请求的状态
+      if (seq !== syncSeq)
+        return
       status.value = 'fail'
       error.value = errorText(err)
     }
@@ -120,9 +164,18 @@ export function useResumeSourceSync(opts: UseResumeSourceSyncOptions) {
       return
     if (syncedKeys.has(key))
       return
+    // 本会话里刚取回来的那份内容（它带着文件名，与上面的 key 只差后半段）
+    if (anySameContent(key, syncedKeys))
+      return
 
-    // 用存下来的时间播种，但只在它确实属于当前这份内容时才算数
-    if (!lastSyncKey && opts.syncedKey() === key) {
+    /*
+     * 用存下来的时间播种，但只在它确实属于当前这份内容时才算数。
+     *
+     * ⚠ 这里同样按前缀比：设置页重新打开时配置里的文件名可能还是空的（上一次自动挑中
+     *   的文件名写在**简历**上、不一定回写进了来源配置），此时 identify 给的是
+     *   `<id>|` 而存的 key 是 `<id>|resume.md` —— 完全相等的话这条节流永远不生效。
+     */
+    if (!lastSyncKey && opts.syncedKey() && sameContent(key, opts.syncedKey()!)) {
       const stored = Date.parse(opts.syncedAt() ?? '')
       if (Number.isFinite(stored)) {
         lastSyncKey = key
@@ -130,7 +183,7 @@ export function useResumeSourceSync(opts: UseResumeSourceSyncOptions) {
       }
     }
 
-    if (key === lastSyncKey && Date.now() - lastSyncAt < AUTO_SYNC_MIN_INTERVAL_MS) {
+    if (lastSyncKey && sameContent(key, lastSyncKey) && Date.now() - lastSyncAt < AUTO_SYNC_MIN_INTERVAL_MS) {
       status.value = 'skipped'
       return
     }

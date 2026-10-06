@@ -191,6 +191,28 @@ describe('自动同步', () => {
     expect(callBackground).toHaveBeenCalledTimes(1)
   })
 
+  /**
+   * 配置里没有文件名（还等着自动挑）时，存的 key 与 `identify()` 算出来的**不会完全相等**。
+   *
+   * 这是防回环与节流最容易同时失效的情形：要求两者相等的话，这条节流永远不生效，
+   * 于是每开一次设置页都白发一次请求（GitHub 匿名额度只有 60 次/小时）。
+   */
+  it('配置里还没回写文件名时，也能认出「就是刚取过的那一份」', async () => {
+    vi.setSystemTime(new Date('2026-03-01T12:00:00Z'))
+    const { wrapper } = mountPanel(
+      { gistId: GIST_ID }, // fileName 留空：identify 给 `<id>|`，而存的是 `<id>|resume.md`
+      {
+        syncedAt: new Date('2026-03-01T11:55:00Z').toISOString(),
+        syncedKey: sourceKey(GIST_ID, 'resume.md'),
+      },
+    )
+
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS * 3)
+
+    expect(callBackground).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('10 分钟内已同步过')
+  })
+
   it('换了 Gist 就不受间隔限制（旧时间不属于新内容）', async () => {
     vi.mocked(callBackground).mockResolvedValue(okFetch())
     vi.setSystemTime(new Date('2026-03-01T12:00:00Z'))
@@ -257,6 +279,49 @@ describe('自动同步', () => {
     expect(wrapper.text()).toContain('同步失败')
     expect(wrapper.text()).toContain('404')
     expect(wrapper.emitted('synced')).toBeUndefined()
+  })
+
+  /**
+   * 并发同步：只有**最新**那一次的响应能改写状态。
+   *
+   * 真实的并发路径是「同步还在途时配置又变了」：同步按钮在 `syncing` 期间是 disabled
+   * 的，所以点不出并发；而配置变化那条 watcher 不检查在途状态，会再发一次。
+   * 旧响应后到时会覆盖新内容，并把 lastSyncKey 记成上一份 —— 于是下一次又变成
+   * 「同一份内容再取一次」。
+   */
+  it('同步在途时配置又变了，旧响应不会覆盖新结果', async () => {
+    const slow = okFetch('# 旧内容', 'old.md', ['old.md'])
+    const fast = okFetch('# 新内容', 'new.md', ['new.md'])
+
+    let resolveSlow: (v: unknown) => void = () => {}
+    const slowPromise = new Promise((resolve) => {
+      resolveSlow = resolve
+    })
+
+    vi.mocked(callBackground)
+      .mockReturnValueOnce(slowPromise as never) // 第一次：挂着不回
+      .mockResolvedValueOnce(fast as never) // 第二次：立刻回
+
+    const { wrapper } = mountPanel({ gistId: GIST_ID })
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS)
+    expect(callBackground).toHaveBeenCalledTimes(1)
+
+    // 在途时用户又改了配置 → 去抖后发起第二次同步
+    await wrapper.setProps({ config: { gistId: GIST_ID, token: '', fileName: '', ...{} } as never })
+    await wrapper.setProps({ config: { gistId: 'cc5a315d61ae9438b18d', token: '', fileName: '' } as never })
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS)
+    expect(callBackground).toHaveBeenCalledTimes(2)
+
+    const emitted = wrapper.emitted('synced') as any[]
+    expect(emitted, '第二次同步应当已经带回内容').toBeTruthy()
+    expect(emitted.at(-1)[0]).toMatchObject({ markdown: '# 新内容' })
+
+    // 现在让那个慢的旧请求回来：它不该再改任何状态
+    resolveSlow(slow)
+    await vi.advanceTimersByTimeAsync(DEBOUNCE_MS)
+
+    expect((wrapper.emitted('synced') as any[]).at(-1)[0]).toMatchObject({ markdown: '# 新内容' })
+    expect(wrapper.text()).toContain('已同步 5 字 · new.md')
   })
 })
 
