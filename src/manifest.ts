@@ -68,16 +68,25 @@ export async function getManifest() {
       open_in_tab: true,
     },
     background: {
-      // Chrome uses service_worker; Firefox (>=121) falls back to scripts.
-      // Firefox 109-120 has a bug where background fails to start when
-      // service_worker is present, so we strip it for Firefox builds.
-      // See https://mzl.la/4r6SF1L and Firefox bug 1860304.
+      /*
+       * 两个浏览器要的是**不同的键**，而且各自只认自己那个：
+       *
+       *  - Chrome（MV3）：只认 `service_worker`。多出来的 `scripts` 是 MV2 的键，
+       *    Chrome 会直接在扩展页报「'background.scripts' requires manifest
+       *    version of 2 or lower」——它不会因此挂掉，但每装一次都留一条噪音警告，
+       *    而扩展页是用户排障时第一眼看的地方，不该有假警报。
+       *  - Firefox：走 `scripts` + `type: module`（见下面的历史注释）。
+       *
+       * 因此这里按浏览器分支**互斥**地给键，而不是两个都写上「以兼容两边」。
+       * src/__tests__/manifest.spec.ts 钉住了这条：Chrome 产物里不许出现 scripts。
+       *
+       * 历史：Firefox 109-120 有 bug：只要存在 service_worker，后台就起不来，
+       * 所以 Firefox 分支反而要把它摘掉。见 https://mzl.la/4r6SF1L 与
+       * Firefox bug 1860304。
+       */
       ...(isFirefox
         ? { scripts: ['dist/background/index.mjs'], type: 'module' as const }
-        : {
-            service_worker: 'dist/background/index.mjs',
-            scripts: ['dist/background/index.mjs'],
-          }),
+        : { service_worker: 'dist/background/index.mjs' }),
     },
     browser_specific_settings: {
       gecko: {

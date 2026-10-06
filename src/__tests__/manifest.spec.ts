@@ -73,4 +73,20 @@ describe('manifest 由站点描述生成', () => {
     // 少一处可被页面探测的指纹
     expect(manifest.web_accessible_resources).toBeUndefined()
   })
+
+  it('chrome 产物不含 background.scripts（那是 MV2 的键，Chrome 会报噪音警告）', async () => {
+    const manifest = await getManifest()
+
+    /*
+     * 真实症状：扩展管理页里出现
+     * 「'background.scripts' requires manifest version of 2 or lower」。
+     * 它不影响运行，但用户排障时第一眼看到的就是这条假警报 —— 所以两个键
+     * 必须按浏览器互斥地给（Chrome 只给 service_worker）。
+     *
+     * ⚠ 单测里没有 EXTENSION=firefox，因此这里校验的就是 Chrome 产物。
+     *   Firefox 那份由 `pnpm build:firefox` 走同一个分支判断生成。
+     */
+    expect(manifest.background).toEqual({ service_worker: 'dist/background/index.mjs' })
+    expect(manifest.background).not.toHaveProperty('scripts')
+  })
 })
