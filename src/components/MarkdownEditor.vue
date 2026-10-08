@@ -6,6 +6,7 @@ import { createJavaScriptRegexEngine } from 'shiki/engine/javascript'
 import markdown from 'shiki/langs/markdown.mjs'
 import vitesseDark from 'shiki/themes/vitesse-dark.mjs'
 import { onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import EditorWorker from './monaco-editor.worker?worker'
 
 /**
  * Markdown 编辑器：Monaco + Shiki 高亮。
@@ -13,7 +14,7 @@ import { onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
  * 按 Shiki 官方 Monaco 集成实现（https://shiki.style/packages/monaco）：
  *   monaco-editor-core + @shikijs/monaco 的 shikiToMonaco()
  *
- * 两个刻意的取舍：
+ * 三个刻意的取舍：
  *
  * 1. 用「细粒度 bundle」（createHighlighterCore + 显式引入语法/主题），
  *    而不是 `shiki` 全量入口。全量入口会把所有语言和主题都打进产物。
@@ -21,9 +22,13 @@ import { onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
  * 2. 用 JavaScript 正则引擎而非 Oniguruma WASM：
  *    省掉 wasm 资源与 CSP 的麻烦，Markdown 这种简单语法完全够用。
  *
- * 3. 不注册任何 web worker：纯 Markdown 编辑不需要语言服务。
- *    Monaco 只在需要语言服务时才创建 worker（且用的是动态 URL），
- *    这里额外装上守卫，万一被触发也能给出明确报错而不是静默失败。
+ * 3. 提供 worker —— Monaco 默认的链接识别 / 词级补全 provider
+ *    对所有语言都注册（用的语言 id 是 `*`），即使我们没注册任何
+ *    Markdown 专属服务，编辑器一挂载就会触发 worker 创建。
+ *    不给的话会同时出两条：
+ *      - Monaco 自己的「Could not create web worker ...」警告；
+ *      - 内部捕获异常后回退到主线程跑，编辑器输入时多一份同步计算。
+ *    干脆提供一个真 worker —— 见 ./monaco-editor.worker.ts。
  */
 
 const props = defineProps<{
@@ -54,10 +59,16 @@ async function initEditor(): Promise<void> {
   if (!host.value)
     return
 
-  // 守卫：Markdown 不需要 worker，若被触发说明有意外，明确报错便于定位
+  /*
+   * Monaco 链接识别 / 词级补全默认对所有语言都用 worker —— 不在这里配一个，
+   * 控制台就会刷「Could not create web worker ...」警告（且内部回退到主线程）。
+   *
+   * 每一个 `monaco.editor.create` 都共享同一个 MonacoEnvironment，
+   * 所以挂多个编辑器实例也只会构造一次 Worker 入口。
+   */
   window.MonacoEnvironment = {
     getWorker() {
-      throw new Error('[offer-hunter] Markdown 编辑器不应创建 web worker')
+      return new EditorWorker()
     },
   }
 
