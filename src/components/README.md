@@ -122,7 +122,7 @@ It will only bundle the icons you use. Check out [unplugin-icons](https://unplug
 
 ### PromptField
 
-`PromptField.vue` —— 设置页里一段自定义提示词的输入框（标题 + 紧贴标题的「清空」+
+`PromptField.vue` —— 设置页里一段自定义提示词的输入框（标题 + 右上角「清空」+
 固定高度的多行框 + 说明插槽）。**设置页的提示词都用它**，不要再手写一份 ScrollArea +
 textarea：各写一份的结果是高度、padding、清空按钮的行为各走各的（提示词框的
 padding 就这么丢过一次，见上）。
@@ -130,8 +130,11 @@ padding 就这么丢过一次，见上）。
 「清空」是**两步式**：第一次按下进入「待确认」（按钮文字变红），3 秒内不二次按下
 就自动撤销，期间继续编辑输入框也会撤销。
 
-「清空」紧贴标题显示，而不是钉在标题栏的最右 —— 让可点区域与文字本身重合，
-避免「右侧整片空白都能清」的视觉错觉。
+⚠ 这里有个**真实踩过的坑**：外层用了 `<label>`，按 HTML 规范，没有 `for` 时它会
+关联 DOM 树里遇到的**第一个** labelable 元素；按钮刚好排在 textarea 前面，于是
+点标题文字甚至点空白区域都会被浏览器当成「点击 label → 派发 click 给按钮」，
+整个标题栏都误触发了清空。改用 `<label :for="inputId">` + `<textarea :id="inputId">`
+显式指向输入框就绕开了，`useId()` 保证同页多段提示词不撞 id。
 
 | prop / 插槽 | 说明 |
 | --- | --- |

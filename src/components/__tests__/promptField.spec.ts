@@ -106,4 +106,13 @@ describe('promptField', () => {
     await button.trigger('click')
     expect(hasClearEmitted(wrapper)).toBe(false)
   })
+
+  it('点击按钮以外的区域不会进入「待确认」', async () => {
+    const wrapper = mountField('开头用您好')
+    // 标题所在的 span：点它按理不应该触发清空
+    await wrapper.get('span.mb-1 > span').trigger('click')
+
+    expect(hasClearEmitted(wrapper)).toBe(false)
+    expect(wrapper.get('button').text()).toBe('清空')
+  })
 })
