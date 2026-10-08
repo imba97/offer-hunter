@@ -1,11 +1,12 @@
 <script setup lang="ts">
+import { onBeforeUnmount, ref, watch } from 'vue'
 import ScrollArea from '~/components/ScrollArea.vue'
 
 /**
  * 一段自定义提示词的输入框。
  *
  * 设置页的「提示词」页里有好几段同构内容（打分口径、招呼语规则），抽出来是为了让
- * 它们**长得一模一样**：固定高度 + 自绘滚动条 + 右上角「清空」。各写一份的话，
+ * 它们**长得一模一样**：固定高度 + 自绘滚动条 + 「清空」。各写一份的话，
  * 改高度或 padding 时总会漏掉其中一处（提示词框的 padding 就这么丢过一次）。
  *
  * 只负责「值 + 标题 + 占位符」，说明文字由调用方通过 hint 插槽给 —— 各字段要说的
@@ -24,28 +25,71 @@ withDefaults(defineProps<{
 const value = defineModel<string>({ required: true })
 
 /**
- * 清空。
+ * 清空（带二次确认）。
  *
- * 只是把值置空，内置提示词仍在生效，所以按钮仅在**本来写了东西**时出现 ——
- * 一个点了看不出变化的按钮比没有按钮更让人困惑。
+ * 「清空」一按就生效太容易误伤（手抖蹭到、误点），改成两步式：第一次按下进入
+ * 「待确认」状态（按钮文字变红），3 秒内没二次按下就自动撤销；用户在这期间
+ * 继续写内容也会撤销 —— 大概率改了主意。
+ *
+ * 「清空」紧贴标题（而不是 `justify-between` 钉在最右）：之前的最右布局让整条
+ * 标题栏的空白看着都像可点，按钮再小也像占了半行。inline 后可点区域就是按钮本身，
+ * 配合 `p-0` 让点击范围贴着文字 —— 视觉上「哪里能点」和「文字本身」重合。
  */
-function clear(): void {
-  value.value = ''
+const confirming = ref(false)
+let confirmTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearConfirmTimer(): void {
+  if (confirmTimer !== null) {
+    clearTimeout(confirmTimer)
+    confirmTimer = null
+  }
 }
+
+function startConfirm(): void {
+  confirming.value = true
+  clearConfirmTimer()
+  confirmTimer = setTimeout(() => {
+    confirming.value = false
+    confirmTimer = null
+  }, 3000)
+}
+
+function clear(): void {
+  if (confirming.value) {
+    value.value = ''
+    clearConfirmTimer()
+    confirming.value = false
+    return
+  }
+  startConfirm()
+}
+
+// 用户在「待确认」期间继续编辑 → 撤销待确认；写下的内容说明他大概率不是想清空
+watch(value, (v) => {
+  if (confirming.value && v !== '') {
+    clearConfirmTimer()
+    confirming.value = false
+  }
+})
+
+onBeforeUnmount(clearConfirmTimer)
 </script>
 
 <template>
   <div>
     <label class="block">
-      <span class="mb-1 flex items-center justify-between text-sm text-gray-600">
+      <span class="mb-1 flex items-center gap-2 text-sm text-gray-600">
         <span>{{ title }}</span>
         <button
           v-if="value"
           type="button"
-          class="text-xs text-gray-400 hover:text-gray-600"
+          class="p-0 text-xs leading-none transition-colors"
+          :class="confirming
+            ? 'text-red-600 hover:text-red-700'
+            : 'text-gray-400 hover:text-gray-600'"
           @click="clear"
         >
-          清空
+          {{ confirming ? '确认清空？' : '清空' }}
         </button>
       </span>
       <!--
