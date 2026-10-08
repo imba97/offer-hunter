@@ -1,7 +1,7 @@
 {
   "name": "offer-hunter",
   "displayName": "Offer Hunter",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "private": true,
   "packageManager": "pnpm@12.6.0",
   "description": "用你自己配置的 AI 分析简历与招聘网站岗位 JD 的匹配度，并按你的规则生成定制打招呼语。",
