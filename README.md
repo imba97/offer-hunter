@@ -78,7 +78,7 @@ Base URL, model and max output tokens are overridable on every preset, and there
 | --- | --- |
 | [BOSS Zhipin](https://www.zhipin.com/web/geek/jobs) | The site's own API |
 | [eleduck](https://eleduck.com/jobs-channel) | Page DOM only |
-| [V2EX 酷工作](https://www.v2ex.com/go/jobs) | Page DOM only |
+| [V2EX 酷工作](https://www.v2ex.com/go/jobs) / [远程工作](https://www.v2ex.com/go/remote) | Page DOM only |
 | [影视飓风 (MediaStorm)](https://mediastorm.jobs.feishu.cn/index/position) | The site's own API (Feishu ATS) |
 
 The side panel's Jobs tab lists one "open jobs page" button per platform, in that platform's brand colour; open any posting from there and it becomes the job under analysis.

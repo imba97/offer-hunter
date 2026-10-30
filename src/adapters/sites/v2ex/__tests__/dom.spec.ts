@@ -7,20 +7,20 @@ import { isJobPostPage, readTopicTitle, topicIdFromUrl } from '../selectors'
  * V2EX 适配器的 DOM 读取测试。
  *
  * 这个站点的岗位**只有** DOM 这一条取数路径（没有接口），所以这里的断言就是
- * 它的全部取数契约：能不能认出「酷工作」节点下的帖子、标题对不对、JD 是不是正文。
+ * 它的全部取数契约：能不能认出工作节点下的帖子、标题对不对、JD 是不是正文。
  *
  * 四类真机样本（结构均照抄线上页面）：
  *  1. `/t/1245478` —— 招聘帖，节点「酷工作」（`/go/jobs`）→ 是岗位
- *  2. `/t/1151259` —— 也是招聘帖，但节点是「远程工作」（`/go/remote`）→ **不是**
+ *  2. `/t/1151259` —— 也是招聘帖，节点「远程工作」（`/go/remote`）→ 是岗位
  *  3. `/go/jobs` —— 节点列表页（侧栏里也有 `/go/jobs` 链接）→ **不是**
- *  4. 非招聘话题 → **不是**
+ *  4. 别的节点下的话题 → **不是**
  */
 
 /**
  * 造一个主题页。
  *
- * `nodePath` 是节点头部里那条链接的目标 —— 它就是「这一页属不属于酷工作」的
- * 全部依据（对应真机里 V2EX › 酷工作 那条面包屑）。
+ * `nodePath` 是节点头部里那条链接的目标 —— 它就是「这一页属不属于工作节点」的
+ * 全部依据（对应真机里 V2EX › 酷工作 / V2EX › 远程工作 那条面包屑）。
  */
 function mountTopic(options: {
   nodePath: string
@@ -59,9 +59,9 @@ describe('工作帖识别（isJobPostPage）', () => {
     expect(isJobPostPage()).toBe(true)
   })
 
-  it('招聘帖但节点是 /go/remote「远程工作」→ 不是工作帖（只认酷工作节点）', () => {
+  it('节点是 /go/remote「远程工作」→ 同样是工作帖', () => {
     mountTopic({ nodePath: '/go/remote', nodeName: '远程工作', title: '招聘（远程办公-web3）' })
-    expect(isJobPostPage()).toBe(false)
+    expect(isJobPostPage()).toBe(true)
   })
 
   it('节点列表页 /go/jobs：侧栏虽有 /go/jobs 链接，但没有标题行 → 不是工作帖', () => {
@@ -137,12 +137,23 @@ describe('jD 读取（readJdFromDom）', () => {
     expect(jd).toContain('1.本科及以上学历。')
   })
 
-  it('非酷工作节点的帖子返回 null（于是内容脚本不会产生任何岗位）', () => {
+  it('远程工作节点的帖子同样读得到正文', () => {
     mountTopic({
       nodePath: '/go/remote',
       nodeName: '远程工作',
       title: '招聘（远程办公-web3）',
-      body: '岗位职责：…',
+      body: '岗位职责：<br />负责后端服务。',
+    })
+
+    expect(readJdFromDom()).toContain('负责后端服务。')
+  })
+
+  it('别的节点的帖子返回 null（于是内容脚本不会产生任何岗位）', () => {
+    mountTopic({
+      nodePath: '/go/qna',
+      nodeName: '问与答',
+      title: '怎么学 Rust？',
+      body: '如题。',
     })
     expect(readJdFromDom()).toBeNull()
   })
@@ -177,8 +188,14 @@ describe('岗位名（readJobOutlineFromDom）', () => {
     expect(readJobOutlineFromDom()).toEqual({ jobName: '[招聘]: 医疗器械软件工程师', brandName: '' })
   })
 
-  it('非工作帖一律空串', () => {
+  it('远程工作节点的帖子同样给出标题', () => {
     mountTopic({ nodePath: '/go/remote', nodeName: '远程工作', title: '招聘（远程办公-web3）' })
+
+    expect(readJobOutlineFromDom()).toEqual({ jobName: '招聘（远程办公-web3）', brandName: '' })
+  })
+
+  it('别的节点一律空串', () => {
+    mountTopic({ nodePath: '/go/qna', nodeName: '问与答', title: '怎么学 Rust？' })
     expect(readJobOutlineFromDom()).toEqual({ jobName: '', brandName: '' })
   })
 })
@@ -249,7 +266,7 @@ describe('适配器契约', () => {
   })
 
   it('观察器容器按契约只回答「容器在不在」，判定留给 readJd（非工作帖照样能挂上）', () => {
-    mountTopic({ nodePath: '/go/remote', nodeName: '远程工作', title: '随便聊聊', body: '正文' })
+    mountTopic({ nodePath: '/go/qna', nodeName: '问与答', title: '随便聊聊', body: '正文' })
     // 容器拿得到 —— 判定不在容器选择器里，否则非工作帖会陷入 500ms 的挂载重试
     expect(v2exSite.jdProbeElement()).not.toBeNull()
     expect(v2exSite.jdContainerElement()).not.toBeNull()

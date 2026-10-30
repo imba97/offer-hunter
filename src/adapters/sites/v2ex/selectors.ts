@@ -18,7 +18,23 @@
 export const TOPIC_HEADER = '#Main .header'
 
 /**
- * 「酷工作」节点链接 —— **是不是工作帖子的唯一判据**。
+ * 工作节点（V2EX 的「节点」= 版块）的路径。
+ *
+ * 目前是两个：
+ *  - `/go/jobs`   酷工作
+ *  - `/go/remote` 远程工作
+ *
+ * 远程工作同样是招聘节点（真机 `https://www.v2ex.com/t/1151259` 就发在这里），
+ * 帖子结构与酷工作完全一致 —— 同样的 `h1` 标题、同样的 `.topic_content` 正文，
+ * 区别只在帖子属性里的节点不同。此前只认酷工作，于是整个远程工作节点都被漏掉。
+ *
+ * 用 `href` 属性精确匹配而不是链接文字：`href` 是路由的一部分（改版成本高），
+ * 而节点显示名随时可能被改（「酷工作」就改过名字）。
+ */
+export const JOB_NODE_PATHS = ['/go/jobs', '/go/remote']
+
+/**
+ * 工作节点链接 —— **是不是工作帖子的唯一判据**（任一节点命中即可）。
  *
  * V2EX 的节点是帖子属性，节点名写在主题页的节点头部里：
  *
@@ -26,14 +42,11 @@ export const TOPIC_HEADER = '#Main .header'
  *     <div><a href="/">V2EX</a> › <a href="/go/jobs">酷工作</a></div>
  *     <h1>[招聘]: 医疗器械软件工程师…</h1>
  *
- * 所以「这一页属不属于酷工作」就是「头部里有没有这条链接」。真机反例同样验证过：
- * `https://www.v2ex.com/t/1151259`（招聘帖，但发在 `/go/remote`「远程工作」节点）
- * 这里**没有** `/go/jobs` 链接，因此**不**被识别 —— 与需求一致。
- *
- * 用 `href` 属性精确匹配而不是链接文字：`href` 是路由的一部分（改版成本高），
- * 而「酷工作」这个显示名随时可能被改。
+ * 所以「这一页属不属于工作节点」就是「头部里有没有这几条链接之一」。
  */
-export const JOB_NODE_LINK = `${TOPIC_HEADER} a[href="/go/jobs"]`
+export const JOB_NODE_LINK = JOB_NODE_PATHS
+  .map(path => `${TOPIC_HEADER} a[href="${path}"]`)
+  .join(', ')
 
 /** 帖子标题行（主题页有且只有一个 h1） */
 export const TOPIC_TITLE = '#Main .header h1'
@@ -50,10 +63,10 @@ export const TOPIC_TITLE = '#Main .header h1'
 export const TOPIC_CONTENT = '#Main .topic_content'
 
 /**
- * 当前页面是不是一个工作帖子（酷工作节点下的主题页）。
+ * 当前页面是不是一个工作帖子（工作节点下的主题页）。
  *
  * 两条判据取与，缺一不可：
- *  1. 节点头部里有 `/go/jobs` 链接 → 这个帖子发在酷工作节点
+ *  1. 节点头部里有工作节点链接（`/go/jobs` 或 `/go/remote`）→ 这个帖子发在工作节点
  *  2. 页面有标题行（`h1`）→ 这确实是一个主题页
  *
  * 第二条不是冗余：节点页 `/go/jobs` 的侧栏里也有指向 `/go/jobs` 的链接，只按

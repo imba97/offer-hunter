@@ -8,7 +8,8 @@ export default defineSiteMeta({
   label: 'V2EX',
   /*
    * 「酷工作」节点页。只是**列表**地址：拿岗位内容要到具体的帖子页
-   * （/t/<id>），且只认发在这个节点下的帖子。
+   * （/t/<id>）。工作节点不止这一个 —— 「远程工作」（/go/remote）同样算
+   * （见 selectors.ts 的 JOB_NODE_PATHS），这里只是把最常用的那个给「去找工作」用。
    */
   jobsPageUrl: 'https://www.v2ex.com/go/jobs',
   // 帖子正文由服务端直接渲染进 HTML，页面自己不调详情接口，因此只读 DOM

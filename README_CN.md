@@ -98,7 +98,7 @@ pnpm build
 | --- | --- |
 | [BOSS 直聘](https://www.zhipin.com/web/geek/jobs) | 页面接口 |
 | [电鸭社区](https://eleduck.com/jobs-channel) | 只读页面 DOM |
-| [V2EX 酷工作](https://www.v2ex.com/go/jobs) | 只读页面 DOM |
+| [V2EX 酷工作](https://www.v2ex.com/go/jobs) / [远程工作](https://www.v2ex.com/go/remote) | 只读页面 DOM |
 | [影视飓风](https://mediastorm.jobs.feishu.cn/index/position) | 页面接口（飞书招聘 ATS） |
 
 侧边栏的「岗位」页会按平台列出各自的职位页入口（按钮用平台主色），点开后任意打开一个岗位/帖子即可分析。

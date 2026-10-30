@@ -24,10 +24,10 @@ import {
  * 直接渲染进 HTML），岗位完全从页面读 —— 所以这里不实现那四个接口方法，
  * manifest 也不会给这个站点注入 MAIN world 脚本。
  *
- * 另一处差别是**帖子即岗位，但要挑节点**：V2EX 是一个综合论坛，只有发在
- * 「酷工作」节点（`/go/jobs`）的帖子才算岗位。判据是节点头部里那条 `/go/jobs`
- * 链接（见 selectors.ts 的 isJobPostPage），别的节点下的帖子一律不认 ——
- * 因此内容脚本在非工作帖上不会产生任何岗位。
+ * 另一处差别是**帖子即岗位，但要挑节点**：V2EX 是一个综合论坛，只有发在工作
+ * 节点（「酷工作」`/go/jobs`、「远程工作」`/go/remote`）的帖子才算岗位。判据是
+ * 节点头部里那几条节点链接之一（见 selectors.ts 的 isJobPostPage），别的节点下
+ * 的帖子一律不认 —— 因此内容脚本在非工作帖上不会产生任何岗位。
  *
  * 本文件是**唯一**允许出现 `v2ex` / `topic_content` 这类站点知识的边界之一
  * （另一个是 meta.ts / selectors.ts / dom.ts）。
@@ -48,10 +48,10 @@ export default defineSite({
    * 岗位页就是主题页 `/t/<id>`（地址里带着帖子 id）。节点页 `/go/jobs` 不算：
    * 那里只有列表，正文与标题都不在。
    *
-   * ⚠ 与 DOM 层面的判据（selectors.ts 的 isJobPostPage：节点得是「酷工作」）分工
-   *   不同：这里只回答「地址上有没有一个主题」，这个主题算不算工作帖由 readJd 决定。
-   *   V2EX 里别的节点的主题页因此会「是岗位页但没有岗位」—— 这是对的：
-   *   那种页面上不该显示上一个岗位。
+   * ⚠ 与 DOM 层面的判据（selectors.ts 的 isJobPostPage：节点得是「酷工作」或
+   *   「远程工作」）分工不同：这里只回答「地址上有没有一个主题」，这个主题算不算
+   *   工作帖由 readJd 决定。V2EX 里别的节点的主题页因此会「是岗位页但没有岗位」
+   *   —— 这是对的：那种页面上不该显示上一个岗位。
    */
   isJobPage: url => topicIdFromUrl(url) !== '',
 
@@ -87,7 +87,7 @@ export default defineSite({
   diagnose() {
     const selectors = [
       { key: 'title', label: '帖子标题行', selector: TOPIC_TITLE },
-      { key: 'nodeLink', label: '节点链接（工作帖判据）', selector: JOB_NODE_LINK },
+      { key: 'nodeLink', label: '节点链接（工作帖判据：酷工作 / 远程工作）', selector: JOB_NODE_LINK },
       { key: 'body', label: '帖子正文', selector: TOPIC_CONTENT },
     ]
 
